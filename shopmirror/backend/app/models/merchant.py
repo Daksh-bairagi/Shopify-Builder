@@ -56,10 +56,10 @@ class Collection:
 
 @dataclass
 class Policies:
-    refund: str
-    shipping: str
-    privacy: str
-    terms_of_service: str
+    refund: str = ""
+    shipping: str = ""
+    privacy: str = ""
+    terms_of_service: str = ""
 
 
 @dataclass

@@ -17,6 +17,21 @@ writing any code in every session:
   service specs, DB schema, LangGraph agent spec, all prompts, 
   8-day build plan
 
+## Git Commits
+Never add `Co-Authored-By` lines to commit messages. Commits should appear as authored by Daksh Bairagi only.
+
+## Decision Log
+A running log of every meaningful build decision lives in `DECISION_LOG.md` at the repo root.
+
+**Append an entry to `DECISION_LOG.md` only for core decisions:**
+- Choosing one architecture, pattern, or library over a real alternative
+- A product-level call that affects user-facing behaviour
+- Resolving a genuine spec ambiguity in a specific direction
+
+Do NOT log: version bumps, minor code style choices, tooling config, file organisation. If the decision wouldn't matter to someone reading the codebase in 6 months, skip it.
+
+Entry format: `**Chose X over Y — reason.**` One entry per decision, 1–2 sentences max.
+
 ## Hard Rules — Never Break These
 - Always read both spec files before writing any code
 - Never deviate from directory structure in TECHSPEC Section 1
@@ -32,7 +47,7 @@ writing any code in every session:
 - All I/O uses httpx or asyncpg
 
 ## Stack
-Python 3.11 / FastAPI / React 18 / PostgreSQL 15 / 
+Python 3.12 / FastAPI / React 18 / PostgreSQL 15 / 
 LangGraph / LangChain / Google Cloud Vertex AI / AWS EC2+RDS
 
 ## Project Root
@@ -51,12 +66,24 @@ from app.models.jobs import AnalysisJob, JobStatus, JobProgress
 
 ## What Is Already Built
 - `shopmirror/` — full directory skeleton (all folders + empty files)
-- `backend/app/db/migrations/001_initial.sql` — analysis_jobs + fix_backups tables
-- `backend/requirements.txt` — all 15 pinned dependencies
-- `backend/.env.example` — all env vars with comments
+- `backend/app/db/migrations/001_initial.sql` — analysis_jobs + fix_backups tables; fix_id UNIQUE
+- `backend/requirements.txt` — all dependencies incl. duckduckgo-search, gql[aiohttp]
+- `backend/.env` + `backend/.env.example` — all env vars, DATABASE_URL pre-filled for Docker
 - `frontend/.env.example` — VITE_API_BASE_URL, VITE_POLLING_INTERVAL_MS
-- `docker-compose.yml` — postgres:15, db service, named volume for persistence
-- `backend/app/models/merchant.py` — MerchantData, Product, Collection, Policies + sub-types
+- `docker-compose.yml` — postgres:15, named volume
+- `backend/app/models/merchant.py` — MerchantData, Product, Collection, Policies (all fields have defaults)
 - `backend/app/models/findings.py` — Finding, AuditReport, PillarScore, MCPResult, PerceptionDiff, CompetitorResult, CopyPasteItem
 - `backend/app/models/fixes.py` — FixItem, FixPlan, FixResult
 - `backend/app/models/jobs.py` — AnalysisJob, JobStatus, JobProgress
+- `backend/app/schemas.py` — EMPTY FILE — all API request/response Pydantic schemas go here (see file for full spec); implement on Day 2 before adding routes to main.py
+- `backend/app/db/connection.py` — asyncpg pool, get_pool(), close_pool()
+- `backend/app/db/queries.py` — create_job(store_url, has_token, store_domain), update_job_report(status param), update_job_error()
+- `backend/app/utils/retry.py` — async_retry decorator, 3 retries, 1/2/4s, 429+503 only
+- `backend/app/utils/validators.py` — validate_shopify_url(), detect_shopify()
+- `backend/app/main.py` — FastAPI app, lifespan, /health; route stubs commented with day + schema imports needed
+- `backend/app/__init__.py` + all subpackage `__init__.py` — package structure complete
+
+## Known Deferred Items
+- **LangGraph checkpointing** — graph state is in-memory only. On Day 6 wire `AsyncPostgresSaver` using the existing asyncpg pool. See DECISION_LOG for full context.
+- **`schemas.py` implementation** — file exists, all shapes commented inside. Implement on Day 2 before writing any route handlers in main.py.
+- **`dataclasses.asdict()`** — when passing AuditReport or any domain dataclass to `update_job_report`, always call `dataclasses.asdict()` first. json.dumps cannot serialize dataclasses directly.

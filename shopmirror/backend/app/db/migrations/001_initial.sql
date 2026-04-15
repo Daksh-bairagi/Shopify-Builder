@@ -17,7 +17,7 @@ CREATE TABLE analysis_jobs (
 CREATE TABLE fix_backups (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   job_id          UUID REFERENCES analysis_jobs(id),
-  fix_id          VARCHAR(64) NOT NULL,
+  fix_id          VARCHAR(64) NOT NULL UNIQUE,
   product_id      VARCHAR(128),
   field_type      VARCHAR(64),
   -- field_type values: title | product_type | metafield | alt_text
