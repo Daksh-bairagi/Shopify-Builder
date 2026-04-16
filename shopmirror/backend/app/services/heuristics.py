@@ -7,7 +7,6 @@ All functions return list[Finding] — empty list means check passed.
 from __future__ import annotations
 
 import re
-import uuid
 from typing import Optional
 
 from app.models.merchant import MerchantData
@@ -103,12 +102,6 @@ def check_robot_crawlers(data: MerchantData) -> list[Finding]:
                 pass
 
         for bot in bots_to_check:
-            blocked = False
-            for agent, paths in disallows.items():
-                if agent.lower() == bot.lower() or agent == "*":
-                    if "/" in paths:
-                        blocked = True
-                        break
             # Only flag explicit named-bot blocks, not wildcard
             named_blocked = False
             for agent, paths in disallows.items():
