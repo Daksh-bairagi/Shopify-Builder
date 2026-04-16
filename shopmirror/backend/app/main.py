@@ -137,13 +137,27 @@ async def run_analysis_pipeline(job_id: str, request: AnalyzeRequest) -> None:
         # Step 2: auditing
         await update_job_status(job_id, "auditing", "Running 19 checks", 40)
         from app.services.heuristics import run_all_checks
+        from app.services.llm_analysis import analyze_products
 
-        findings = run_all_checks(merchant_data)
+        llm_results = await analyze_products(merchant_data.products)
+        findings = run_all_checks(merchant_data, llm_results=llm_results)
 
         # Step 3: simulating (perception diff + query match)
-        await update_job_status(job_id, "simulating", "Assembling report", 80)
+        await update_job_status(job_id, "simulating", "Simulating AI perception", 65)
+        from app.services.perception_diff import (
+            compute_store_perception_diff,
+            compute_product_perceptions,
+        )
         from app.services.query_matcher import run_default_queries
 
+        perception_diff = await compute_store_perception_diff(
+            merchant_data, findings, merchant_intent=request.merchant_intent
+        )
+        product_perceptions = await compute_product_perceptions(
+            merchant_data.products, findings, merchant_intent=request.merchant_intent
+        )
+
+        await update_job_status(job_id, "simulating", "Matching AI queries", 80)
         query_match_results = await run_default_queries(
             merchant_data, paid_tier=bool(request.admin_token)
         )
@@ -154,7 +168,8 @@ async def run_analysis_pipeline(job_id: str, request: AnalyzeRequest) -> None:
         report = await assemble_report(
             merchant_data=merchant_data,
             findings=findings,
-            perception_diff=None,
+            perception_diff=perception_diff,
+            product_perceptions=product_perceptions,
             mcp_results=None,
             query_match_results=query_match_results,
             competitor_results=[],

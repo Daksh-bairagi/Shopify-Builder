@@ -121,6 +121,7 @@ class AuditReport:
     worst_5_products: list[ProductSummary]
     channel_compliance: ChannelCompliance
     perception_diff: Optional[PerceptionDiff]
+    product_perceptions: list[ProductPerception]
     mcp_simulation: Optional[list[MCPResult]]
     query_match_results: list[QueryMatchResult]
     competitor_comparison: list[CompetitorResult]

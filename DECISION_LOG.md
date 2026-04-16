@@ -69,3 +69,9 @@ Core technical and product decisions only. Format: **Chose X over Y — reason.*
 - **Added AI Query Match Simulator** — Closes the evidence-of-impact gap. One LLM call parses the query into structured attributes; deterministic matching loop runs against machine-readable product fields. Shows merchants exactly how many of their products would match an AI shopping query, before and after fixes. No unverifiable claims about real ChatGPT results.
 
 - **Added AI Readiness Certificate** — PNG-exportable before/after summary generated after agent run. Retention mechanism + viral distribution channel for merchant communities.
+
+## Day 3 Implementation
+
+- **`perception_diff.py` uses one batch LLM call for all products, not two calls per product** — spec originally described 2 LLM calls per product (`get_product_perception`). Replaced with a single `BatchProductPerceptionOutput` call across up to 10 products. Fewer LLM calls, lower latency, same analytical quality — correct tradeoff for a hackathon demo with live API costs.
+
+- **`llm_analysis.py` LLM instantiation is lazy (first call), not module-level** — `ChatVertexAI(model="gemini-2.0-flash", temperature=0)` deferred to first invocation. Prevents import-time crash in CI or local dev environments without Vertex AI credentials configured.

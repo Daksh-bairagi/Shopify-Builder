@@ -171,6 +171,7 @@ async def assemble_report(
     query_match_results: list[QueryMatchResult],
     competitor_results: list[CompetitorResult],
     copy_paste_items: list[CopyPasteItem],
+    product_perceptions: list | None = None,
 ) -> AuditReport:
     """
     Assembles all pipeline outputs into a single AuditReport.
@@ -193,6 +194,7 @@ async def assemble_report(
             worst_5_products=worst_5_products,
             channel_compliance=channel_compliance,
             perception_diff=perception_diff,
+            product_perceptions=product_perceptions or [],
             mcp_simulation=mcp_results,
             query_match_results=query_match_results,
             competitor_comparison=competitor_results,
@@ -218,6 +220,7 @@ async def assemble_report(
                 chatgpt_shopping=default_channel,
             ),
             perception_diff=perception_diff,
+            product_perceptions=product_perceptions or [],
             mcp_simulation=mcp_results,
             query_match_results=query_match_results or [],
             competitor_comparison=competitor_results or [],
