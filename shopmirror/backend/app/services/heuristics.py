@@ -38,6 +38,7 @@ def _make_finding(
     fix_type: str,
     fix_instruction: str,
     fix_content: Optional[str] = None,
+    idx: int = 0,
 ) -> Finding:
     pillar_abbrev = {
         "Discoverability": "disc",
@@ -47,7 +48,7 @@ def _make_finding(
         "Transaction": "trans",
     }.get(pillar, pillar.lower()[:4])
 
-    finding_id = f"finding_{check_id}_{pillar_abbrev}"
+    finding_id = f"finding_{check_id}_{pillar_abbrev}_{idx}"
     return Finding(
         id=finding_id,
         pillar=pillar,
@@ -81,25 +82,27 @@ def check_robot_crawlers(data: MerchantData) -> list[Finding]:
         # Parse robots.txt into user-agent blocks
         current_agents: list[str] = []
         disallows: dict[str, list[str]] = {}
+        pending_reset = False
 
         for raw_line in robots.splitlines():
             line = raw_line.strip()
             if not line or line.startswith("#"):
+                pending_reset = True
                 continue
             lower = line.lower()
             if lower.startswith("user-agent:"):
+                if pending_reset:
+                    current_agents = []
+                    pending_reset = False
                 agent = line.split(":", 1)[1].strip()
-                current_agents = [agent]
+                current_agents.append(agent)
                 for a in current_agents:
                     disallows.setdefault(a, [])
-            elif lower.startswith("disallow:"):
+            elif lower.startswith("disallow:") and current_agents:
                 path = line.split(":", 1)[1].strip()
+                pending_reset = True
                 for a in current_agents:
                     disallows.setdefault(a, []).append(path)
-            else:
-                # Any other directive resets current block grouping logic only
-                # (we keep current_agents active for multi-agent stanzas)
-                pass
 
         for bot in bots_to_check:
             # Only flag explicit named-bot blocks, not wildcard
@@ -115,6 +118,7 @@ def check_robot_crawlers(data: MerchantData) -> list[Finding]:
                     check_name="AI Crawler Access",
                     severity="MEDIUM",
                     title=f"{bot} fully blocked in robots.txt",
+                    idx=len(findings),
                     detail=(
                         f"{bot} is blocked from crawling your store via robots.txt "
                         f"(Disallow: /). This affects web-index AI platforms such as "
@@ -696,8 +700,6 @@ def check_schema_availability(data: MerchantData) -> list[Finding]:
             if not product:
                 continue
 
-            actual_in_stock = _is_product_in_stock(product)
-
             for block in schema_blocks:
                 schema_avail = _extract_schema_availability(block)
                 if schema_avail is None:
@@ -705,8 +707,13 @@ def check_schema_availability(data: MerchantData) -> list[Finding]:
 
                 schema_avail_lower = schema_avail.lower().rstrip("/")
                 schema_in_stock = schema_avail_lower in _IN_STOCK_SCHEMA
+                schema_out_of_stock = schema_avail_lower in _OUT_OF_STOCK_SCHEMA
 
-                if actual_in_stock != schema_in_stock:
+                if not schema_in_stock and not schema_out_of_stock:
+                    continue  # unrecognised availability string, skip
+
+                product_actually_in_stock = _is_product_in_stock(product)
+                if schema_in_stock != product_actually_in_stock:
                     if product.id not in mismatched_ids:
                         mismatched_ids.append(product.id)
 
