@@ -47,3 +47,25 @@ Core technical and product decisions only. Format: **Chose X over Y — reason.*
 ## Dependencies
 
 - **`langchain>=0.3.0` + `langgraph>=0.2.28`** — `langgraph==0.2.0` predates langchain 0.3's `langchain-core>=0.3` requirement. `langgraph 0.2.28` is the first release with compatible `langchain-core 0.3.x` support.
+
+---
+
+## Strategic Rebuild — Accuracy + Shopify-Native Upgrades
+
+- **Replaced D1 "CRITICAL — AI cannot see your products" with D1a (MEDIUM) + D1b (CRITICAL)** — Shopify products reach ChatGPT Shopping via Shopify's Catalog API, not web crawling. Blocking GPTBot in robots.txt has no effect on Shopify Catalog visibility. D1a accurately flags web-index AI impact at MEDIUM; D1b is the real CRITICAL check: Shopify Catalog eligibility via taxonomy + required fields.
+
+- **Replaced C1 (product_type string check) with Shopify Standard Taxonomy mapping** — Shopify's 2024 Standard Product Taxonomy is the actual routing layer for Shopify Catalog, Google Shopping, and Meta Catalog. A non-empty product_type string (e.g. "stuff") passes the old check with zero routing value. A taxonomy GID routes products to the correct AI category. Autonomous fix: Gemini classifies → `productUpdate` mutation writes `category` field GID.
+
+- **Removed D4 (price in raw HTML) and T3 (AggregateRating schema)** — D4 universally passes Shopify Liquid-rendered stores; T3 universally fails default Shopify themes. Checks that don't discriminate provide no signal. Slots reallocated to D1b (Catalog eligibility) and D5 (Markets translation).
+
+- **T4 fix upgraded from copy-paste to autonomous Script Tags injection** — Shopify's `scriptTagCreate` Admin GraphQL mutation injects JSON-LD schema into every storefront page without any theme modification. Fully reversible via `scriptTagDelete`. `script_tag_id` stored in `fix_backups` table for rollback. This converts the most CRITICAL finding from a finding merchants ignore into a finding the agent autonomously fixes.
+
+- **AsyncPostgresSaver wired same day as LangGraph graph** — The approval gate interrupt requires persistent graph state. Without `AsyncPostgresSaver`, the paused graph lives in process memory and silently breaks under multi-worker deployment. No longer deferred; both are Day 6.
+
+- **Added AI Readiness Score (0–100) as headline metric** — Weighted composite across 5 pillars (Discoverability 20%, Completeness 30%, Consistency 20%, Trust_Policies 15%, Transaction 15%). Every credible SaaS tool has a single headline score merchants can track. This is the demo's primary emotional anchor.
+
+- **Added Multi-Channel Compliance Dashboard** — Maps existing checks to 5 channels: Shopify Catalog, Google Shopping, Meta Catalog, Perplexity Web, ChatGPT Shopping. Each shows READY/PARTIAL/BLOCKED. No competitor tool provides this single view at this price point.
+
+- **Added AI Query Match Simulator** — Closes the evidence-of-impact gap. One LLM call parses the query into structured attributes; deterministic matching loop runs against machine-readable product fields. Shows merchants exactly how many of their products would match an AI shopping query, before and after fixes. No unverifiable claims about real ChatGPT results.
+
+- **Added AI Readiness Certificate** — PNG-exportable before/after summary generated after agent run. Retention mechanism + viral distribution channel for merchant communities.

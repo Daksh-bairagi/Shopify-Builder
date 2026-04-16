@@ -79,3 +79,6 @@ class MerchantData:
     metafields_by_product: dict[str, list]  # product_id -> metafield list (Mode B)
     seo_by_product: dict[str, dict]         # product_id -> SEO dict (Mode B)
     inventory_by_variant: dict[str, dict]   # variant_id -> inventory dict (Mode B)
+    taxonomy_by_product: dict[str, str] = field(default_factory=dict)    # product_id -> Shopify taxonomy GID (Mode B)
+    markets_by_product: dict[str, dict] = field(default_factory=dict)    # product_id -> {market_id: {title_translated: bool, desc_translated: bool}}
+    metafield_definitions: list[dict] = field(default_factory=list)      # store-level typed MetafieldDefinition objects (Mode B)

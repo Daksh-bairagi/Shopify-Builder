@@ -85,15 +85,43 @@ class CopyPasteItem:
 
 
 @dataclass
+class ChannelStatus:
+    status: str                      # 'READY' | 'PARTIAL' | 'BLOCKED'
+    blocking_check_ids: list[str]    # check_ids that cause this status
+
+
+@dataclass
+class ChannelCompliance:
+    """Multi-channel AI commerce compliance. Each channel maps to specific audit checks."""
+    shopify_catalog: ChannelStatus   # D1b, C1, Con1, A1, A2
+    google_shopping: ChannelStatus   # C4, C1, Con1, Con2
+    meta_catalog: ChannelStatus      # C2, C6, Con1
+    perplexity_web: ChannelStatus    # D1a, D2, D3
+    chatgpt_shopping: ChannelStatus  # T4, T1, T2
+
+
+@dataclass
+class QueryMatchResult:
+    query: str                          # natural language query text
+    matched_product_ids: list[str]
+    total_products: int
+    match_count: int
+    failing_attributes: dict[str, int]  # attribute -> count of products missing it
+
+
+@dataclass
 class AuditReport:
     store_name: str
     store_domain: str
     ingestion_mode: str              # 'url_only' | 'admin_token'
     total_products: int
+    ai_readiness_score: float        # 0–100 composite weighted score across all pillars
     pillars: dict[str, PillarScore]  # pillar name -> PillarScore
     findings: list[Finding]
     worst_5_products: list[ProductSummary]
+    channel_compliance: ChannelCompliance
     perception_diff: Optional[PerceptionDiff]
-    competitor_comparison: list[CompetitorResult]
     mcp_simulation: Optional[list[MCPResult]]
+    query_match_results: list[QueryMatchResult]
+    competitor_comparison: list[CompetitorResult]
     copy_paste_package: list[CopyPasteItem]

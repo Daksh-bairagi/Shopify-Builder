@@ -130,15 +130,16 @@ async def save_fix_backup(
     original_value: str | None,
     new_value: str | None,
     shopify_gid: str | None,
+    script_tag_id: str | None = None,
 ) -> None:
     pool = await get_pool()
     await pool.execute(
         """
         INSERT INTO fix_backups
             (job_id, fix_id, product_id, field_type, field_key,
-             original_value, new_value, shopify_gid)
+             original_value, new_value, shopify_gid, script_tag_id)
         VALUES
-            ($1::uuid, $2, $3, $4, $5, $6, $7, $8)
+            ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)
         """,
         job_id,
         fix_id,
@@ -148,6 +149,7 @@ async def save_fix_backup(
         original_value,
         new_value,
         shopify_gid,
+        script_tag_id,
     )
 
 

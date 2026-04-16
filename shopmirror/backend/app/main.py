@@ -5,12 +5,13 @@ from fastapi import FastAPI
 from app.db.connection import close_pool, get_pool
 
 # Route implementations (to be added per day plan):
-#   POST /analyze              — Day 2, import AnalyzeRequest/AnalyzeResponse from app.schemas
-#   GET  /jobs/{id}            — Day 2, import JobStatusResponse from app.schemas
-#   GET  /jobs/{id}/fix-plan   — Day 6, import FixPlanResponse from app.schemas
-#   POST /jobs/{id}/execute    — Day 6, import ExecuteRequest/ExecuteResponse from app.schemas
-#   POST /jobs/{id}/rollback/{fix_id} — Day 6, import RollbackResponse from app.schemas
-#   GET  /jobs/{id}/before-after      — Day 6, import BeforeAfterResponse from app.schemas
+#   POST /analyze                      — Day 2, schemas: AnalyzeRequest, AnalyzeResponse
+#   GET  /jobs/{id}                    — Day 2, schemas: JobStatusResponse
+#   GET  /jobs/{id}/query-match        — Day 3, schemas: QueryMatchResponse (query param: query: str)
+#   GET  /jobs/{id}/fix-plan           — Day 6, schemas: FixPlanResponse
+#   POST /jobs/{id}/execute            — Day 6, schemas: ExecuteRequest, ExecuteResponse
+#   POST /jobs/{id}/rollback/{fix_id}  — Day 6, schemas: RollbackResponse
+#   GET  /jobs/{id}/before-after       — Day 7, schemas: BeforeAfterResponse
 # All request/response shapes live in app/schemas.py
 
 
