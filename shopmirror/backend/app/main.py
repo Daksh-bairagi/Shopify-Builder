@@ -1,3 +1,4 @@
+import asyncio
 import dataclasses
 from contextlib import asynccontextmanager
 
@@ -157,12 +158,26 @@ async def run_analysis_pipeline(job_id: str, request: AnalyzeRequest) -> None:
             merchant_data.products, findings, merchant_intent=request.merchant_intent
         )
 
-        await update_job_status(job_id, "simulating", "Matching AI queries", 80)
+        await update_job_status(job_id, "simulating", "Matching AI queries", 75)
         query_match_results = await run_default_queries(
             merchant_data, paid_tier=bool(request.admin_token)
         )
 
+        await update_job_status(job_id, "simulating", "Simulating MCP responses", 80)
+        from app.services.mcp_simulation import run_mcp_simulation
+        from app.services.competitor import run_competitor_analysis
+
+        mcp_results, competitor_results = await asyncio.gather(
+            run_mcp_simulation(merchant_data, findings),
+            run_competitor_analysis(
+                merchant_data,
+                findings,
+                competitor_urls=request.competitor_urls if request.competitor_urls else None,
+            ),
+        )
+
         # Step 4: assemble report
+        await update_job_status(job_id, "simulating", "Assembling report", 90)
         from app.services.report_builder import assemble_report
 
         report = await assemble_report(
@@ -170,9 +185,9 @@ async def run_analysis_pipeline(job_id: str, request: AnalyzeRequest) -> None:
             findings=findings,
             perception_diff=perception_diff,
             product_perceptions=product_perceptions,
-            mcp_results=None,
+            mcp_results=mcp_results,
             query_match_results=query_match_results,
-            competitor_results=[],
+            competitor_results=competitor_results,
             copy_paste_items=[],
         )
 
