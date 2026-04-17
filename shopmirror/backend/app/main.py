@@ -3,6 +3,7 @@ import dataclasses
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.connection import close_pool, get_pool
 from app.db.queries import (
@@ -47,6 +48,13 @@ app = FastAPI(
     description="AI representation optimizer for Shopify merchants",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
