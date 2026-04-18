@@ -352,7 +352,6 @@ FIX_TYPE_RESOLVES: dict[str, list[str]] = {
 
 
 def _recompute_pillars(failing_check_ids: set[str]) -> dict:
-    """Re-compute pillar scores given the set of still-failing check_ids."""
     result = {}
     for pillar, checks in PILLAR_CHECKS_MAP.items():
         total = len(checks)
@@ -378,6 +377,7 @@ def _compute_before_after(
     original_findings = original_report.get("findings") or []
     original_pillar_dict = original_report.get("pillars") or {}
 
+    # original_report is always deserialized JSON from DB — findings are plain dicts
     original_failing: set[str] = {f.get("check_id", "") for f in original_findings}
 
     resolved_check_ids: set[str] = set()
@@ -414,8 +414,7 @@ def _compute_before_after(
         "checks_improved": checks_improved,
         "checks_unchanged": checks_unchanged,
         "mcp_before": mcp_before,
-        "mcp_after": None,
-        "manual_action_items": [],
+        "mcp_after": None,      # not re-run post-fix; frontend shows mcp_before only
         "copy_paste_items": copy_paste_items,
     }
 
