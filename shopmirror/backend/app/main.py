@@ -206,6 +206,35 @@ async def rollback_fix(job_id: str, fix_id: str, request: RollbackRequest) -> Ro
 
 
 # ---------------------------------------------------------------------------
+# GET /jobs/{job_id}/before-after
+# ---------------------------------------------------------------------------
+
+@app.get("/jobs/{job_id}/before-after")
+async def get_before_after(job_id: str) -> BeforeAfterResponse:
+    """Return before/after comparison computed by the fix agent."""
+    row = await get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    report_json = row.get("report_json") or {}
+    agent_run = report_json.get("agent_run") or {}
+    before_after = agent_run.get("before_after")
+
+    if before_after is None:
+        raise HTTPException(status_code=404, detail="No before-after data — agent has not run yet")
+
+    return BeforeAfterResponse(
+        original_pillars=before_after.get("original_pillars") or {},
+        current_pillars=before_after.get("current_pillars") or {},
+        checks_improved=before_after.get("checks_improved") or [],
+        checks_unchanged=before_after.get("checks_unchanged") or [],
+        mcp_before=before_after.get("mcp_before"),
+        mcp_after=before_after.get("mcp_after"),
+        manual_action_items=before_after.get("manual_action_items") or [],
+    )
+
+
+# ---------------------------------------------------------------------------
 # Background task: run LangGraph fix agent
 # ---------------------------------------------------------------------------
 
