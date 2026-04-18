@@ -83,3 +83,9 @@ Core technical and product decisions only. Format: **Chose X over Y — reason.*
 - **`perception_diff.py` uses one batch LLM call for all products, not two calls per product** — spec originally described 2 LLM calls per product (`get_product_perception`). Replaced with a single `BatchProductPerceptionOutput` call across up to 10 products. Fewer LLM calls, lower latency, same analytical quality — correct tradeoff for a hackathon demo with live API costs.
 
 - **`llm_analysis.py` LLM instantiation is lazy (first call), not module-level** — `ChatVertexAI(model="gemini-2.0-flash", temperature=0)` deferred to first invocation. Prevents import-time crash in CI or local dev environments without Vertex AI credentials configured.
+
+## Day 7 Implementation
+
+- **Computed before-after in reporter_node rather than re-ingesting on GET /before-after** — admin token is never stored in DB; re-running heuristics with executed_fixes as ground truth gives the same result without a Shopify round-trip.
+
+- **Stored schema snippet and policy draft text in FixResult.shopify_gid field** — avoids adding a new state field; gid is unused for copy-paste fix types and is already a string column.

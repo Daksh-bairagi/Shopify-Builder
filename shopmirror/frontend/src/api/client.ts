@@ -108,6 +108,69 @@ export interface CompetitorResult {
   gaps: string[]
 }
 
+export interface FixItem {
+  fix_id: string
+  product_id: string | null
+  product_title: string | null
+  type: string
+  field: string
+  current_value: string | null
+  proposed_value: string | null
+  reason: string
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM'
+  fix_type: 'auto' | 'copy_paste' | 'manual' | 'developer'
+  check_id: string
+}
+
+export interface FixPlanResponse {
+  fixes: FixItem[]
+}
+
+export interface ExecuteRequest {
+  approved_fix_ids: string[]
+  admin_token: string
+  merchant_intent?: string
+}
+
+export interface ExecuteResponse {
+  execution_job_id: string
+}
+
+export interface FixResult {
+  fix_id: string
+  success: boolean
+  error: string | null
+  shopify_gid: string | null
+  script_tag_id: string | null
+  applied_at: string | null
+}
+
+export interface CopyPasteItem {
+  label: string
+  content: string
+  fix_id: string
+}
+
+export interface BeforeAfterResponse {
+  original_pillars: Record<string, PillarScore>
+  current_pillars: Record<string, PillarScore>
+  checks_improved: string[]
+  checks_unchanged: string[]
+  mcp_before: MCPResult[] | null
+  mcp_after: MCPResult[] | null
+  manual_action_items: Finding[]
+}
+
+export interface AgentRun {
+  fixes_applied: number
+  fixes_failed: number
+  manual_action_items: Finding[]
+  executed_fixes: FixResult[]
+  failed_fixes: FixResult[]
+  verification_results: Record<string, boolean>
+  before_after: BeforeAfterResponse | null
+}
+
 export interface AuditReport {
   store_name: string
   store_domain: string
@@ -123,7 +186,8 @@ export interface AuditReport {
   mcp_simulation: MCPResult[] | null
   query_match_results: QueryMatchResult[]
   competitor_comparison: CompetitorResult[]
-  copy_paste_package: unknown[]
+  copy_paste_package: CopyPasteItem[]
+  agent_run?: AgentRun
 }
 
 export interface QueryMatchResponse {
@@ -163,4 +227,7 @@ export const api = {
   getJob: (jobId: string) => get<JobStatusResponse>(`/jobs/${jobId}`),
   queryMatch: (jobId: string, query: string) =>
     get<QueryMatchResponse>(`/jobs/${jobId}/query-match?query=${encodeURIComponent(query)}`),
+  getFixPlan: (jobId: string) => get<FixPlanResponse>(`/jobs/${jobId}/fix-plan`),
+  execute: (jobId: string, req: ExecuteRequest) => post<ExecuteResponse>(`/jobs/${jobId}/execute`, req),
+  getBeforeAfter: (jobId: string) => get<BeforeAfterResponse>(`/jobs/${jobId}/before-after`),
 }

@@ -3,11 +3,17 @@ import FindingsTable from './FindingsTable'
 import CompetitorPanel from './CompetitorPanel'
 import MCPSimulation from './MCPSimulation'
 import PerceptionDiff from './PerceptionDiff'
+import FixApproval from './FixApproval'
+import AgentActivity from './AgentActivity'
+import BeforeAfterReport from './BeforeAfterReport'
+import ReadinessCertificate from './ReadinessCertificate'
 
 interface Props {
   report: AuditReport
   jobId: string
+  adminToken: string | null
   onReset: () => void
+  onExecute: (approvedFixIds: string[]) => Promise<void>
 }
 
 function scoreLabel(score: number): string {
@@ -131,7 +137,7 @@ const PILLAR_NAMES: Record<string, string> = {
   'Transaction': 'Transact',
 }
 
-export default function Dashboard({ report, jobId: _jobId, onReset }: Props) {
+export default function Dashboard({ report, jobId, adminToken, onReset, onExecute }: Props) {
   const score = Math.round(report.ai_readiness_score)
   const channels = Object.entries(report.channel_compliance) as [
     keyof AuditReport['channel_compliance'],
@@ -403,6 +409,55 @@ export default function Dashboard({ report, jobId: _jobId, onReset }: Props) {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Fix Approval — shown when report is ready and admin token present but agent not yet run */}
+        {adminToken && !report.agent_run && (
+          <div className="mt-8">
+            <h2 className="text-sm font-code text-[#4B5A8A] uppercase tracking-widest mb-4">
+              Fix Plan — Agent Ready
+            </h2>
+            <FixApproval jobId={jobId} onExecute={onExecute} />
+          </div>
+        )}
+
+        {/* Agent Activity — shown after agent has run */}
+        {report.agent_run && (
+          <div className="mt-8">
+            <h2 className="text-sm font-code text-[#4B5A8A] uppercase tracking-widest mb-4">
+              Agent Activity
+            </h2>
+            <AgentActivity agentRun={report.agent_run} />
+          </div>
+        )}
+
+        {/* Before/After Report — shown when agent has run */}
+        {report.agent_run?.before_after && (
+          <div className="mt-8">
+            <h2 className="text-sm font-code text-[#4B5A8A] uppercase tracking-widest mb-4">
+              Before / After Comparison
+            </h2>
+            <BeforeAfterReport
+              data={report.agent_run.before_after}
+              copyPasteItems={report.copy_paste_package}
+              storeName={report.store_name}
+            />
+          </div>
+        )}
+
+        {/* AI Readiness Certificate — shown when before/after is available */}
+        {report.agent_run?.before_after && (
+          <div className="mt-8">
+            <h2 className="text-sm font-code text-[#4B5A8A] uppercase tracking-widest mb-4">
+              AI Readiness Certificate
+            </h2>
+            <ReadinessCertificate
+              storeName={report.store_name}
+              storeDomain={report.store_domain}
+              data={report.agent_run.before_after}
+              agentRun={report.agent_run}
+            />
           </div>
         )}
 
