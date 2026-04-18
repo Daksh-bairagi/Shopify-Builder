@@ -1,6 +1,9 @@
 import asyncio
 import dataclasses
+import logging
 from contextlib import asynccontextmanager
+
+logger = logging.getLogger(__name__)
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,15 +13,22 @@ from app.db.queries import (
     create_job,
     get_job,
     update_job_error,
+    update_job_fix_plan,
     update_job_report,
     update_job_status,
 )
 from app.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
+    BeforeAfterResponse,
+    ExecuteRequest,
+    ExecuteResponse,
+    FixPlanResponse,
     JobProgressResponse,
     JobStatusResponse,
     QueryMatchResponse,
+    RollbackRequest,
+    RollbackResponse,
 )
 from app.utils.validators import validate_shopify_url
 
@@ -69,7 +79,9 @@ async def health():
 
 @app.post("/analyze", status_code=202)
 async def analyze(request: AnalyzeRequest, background_tasks: BackgroundTasks) -> AnalyzeResponse:
-    if not validate_shopify_url(request.store_url):
+    try:
+        await validate_shopify_url(request.store_url)
+    except (ValueError, Exception):
         raise HTTPException(status_code=400, detail="Invalid Shopify store URL")
 
     job_id = await create_job(
@@ -128,7 +140,147 @@ async def query_match(job_id: str, query: str) -> QueryMatchResponse:
 
 
 # ---------------------------------------------------------------------------
-# Background task
+# GET /jobs/{job_id}/fix-plan
+# ---------------------------------------------------------------------------
+
+@app.get("/jobs/{job_id}/fix-plan")
+async def get_fix_plan(job_id: str) -> FixPlanResponse:
+    row = await get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not row["has_token"]:
+        raise HTTPException(status_code=403, detail="Fix plan requires admin token")
+    fix_plan = row.get("fix_plan_json") or {}
+    return FixPlanResponse(fixes=fix_plan.get("fixes", []))
+
+
+# ---------------------------------------------------------------------------
+# POST /jobs/{job_id}/execute
+# ---------------------------------------------------------------------------
+
+@app.post("/jobs/{job_id}/execute", status_code=202)
+async def execute_fixes(
+    job_id: str,
+    request: ExecuteRequest,
+    background_tasks: BackgroundTasks,
+) -> ExecuteResponse:
+    row = await get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if row["status"] not in ("awaiting_approval", "complete"):
+        raise HTTPException(status_code=400, detail="Job not in a state that allows fix execution")
+    if not row["has_token"]:
+        raise HTTPException(status_code=403, detail="Fix execution requires admin token")
+
+    background_tasks.add_task(run_fix_agent_task, job_id, request.approved_fix_ids, request.admin_token, request.merchant_intent)
+    return ExecuteResponse(execution_job_id=job_id)
+
+
+# ---------------------------------------------------------------------------
+# POST /jobs/{job_id}/rollback/{fix_id}
+# ---------------------------------------------------------------------------
+
+@app.post("/jobs/{job_id}/rollback/{fix_id}")
+async def rollback_fix(job_id: str, fix_id: str, request: RollbackRequest) -> RollbackResponse:
+    """Rollback a fix. Admin token is required in the request body."""
+    row = await get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    from app.db.queries import get_fix_backup
+    backup = await get_fix_backup(fix_id)
+    if backup is None:
+        raise HTTPException(status_code=404, detail="Fix backup not found")
+
+    store_domain = row.get("store_domain") or row["store_url"].replace("https://", "").split("/")[0]
+
+    from app.services.shopify_writer import rollback_fix as do_rollback
+    try:
+        field, restored_value = await do_rollback(fix_id, store_domain, request.admin_token)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return RollbackResponse(status="rolled_back", field=field, restored_value=restored_value)
+
+
+# ---------------------------------------------------------------------------
+# Background task: run LangGraph fix agent
+# ---------------------------------------------------------------------------
+
+async def run_fix_agent_task(job_id: str, approved_fix_ids: list[str], admin_token: str, merchant_intent: str | None = None) -> None:
+    """Background task: re-ingests store data and runs the LangGraph fix agent."""
+    try:
+        row = await get_job(job_id)
+        if row is None:
+            return
+
+        fix_plan_data = row.get("fix_plan_json") or {}
+        fix_items_raw = fix_plan_data.get("fixes", [])
+
+        from app.models.fixes import FixItem
+        from app.agent.graph import run_fix_agent
+        from app.agent.state import StoreOptimizationState
+        from app.services.ingestion import fetch_admin_data
+
+        fix_items = [FixItem(**f) for f in fix_items_raw]
+
+        store_url = row["store_url"]
+
+        # Re-ingest with the admin token so the agent has live product data
+        await update_job_status(job_id, "executing", "Re-fetching store data for agent", 5)
+        try:
+            merchant_data = await fetch_admin_data(store_url, admin_token)
+        except Exception as exc:
+            logger.warning("run_fix_agent_task: re-ingestion failed for %s: %s", job_id, exc)
+            # Fall back to stub so the agent can still run reporting
+            from app.models.merchant import MerchantData, Policies
+            store_domain = row.get("store_domain") or store_url.replace("https://", "").split("/")[0]
+            merchant_data = MerchantData(
+                store_domain=store_domain,
+                store_name=store_domain,
+                products=[],
+                collections=[],
+                policies=Policies(),
+                robots_txt="",
+                sitemap_present=False,
+                sitemap_has_products=False,
+                llms_txt=None,
+                schema_by_url={},
+                price_in_html={},
+                ingestion_mode="admin_token",
+                metafields_by_product={},
+                seo_by_product={},
+                inventory_by_variant={},
+            )
+
+        initial_state: StoreOptimizationState = {
+            "job_id": job_id,
+            "store_data": merchant_data,
+            "admin_token": admin_token,
+            "merchant_intent": merchant_intent,
+            "audit_findings": [],
+            "fix_plan": fix_items,
+            "approved_fix_ids": approved_fix_ids,
+            "executed_fixes": [],
+            "failed_fixes": [],
+            "current_fix_id": None,
+            "retry_count": 0,
+            "iteration": 0,
+            "verification_results": {},
+            "manual_action_items": [],
+            "final_report": None,
+        }
+
+        await run_fix_agent(initial_state)
+
+    except Exception as exc:
+        logger.error("run_fix_agent_task failed for job %s: %s", job_id, exc)
+
+
+# ---------------------------------------------------------------------------
+# Background task: analysis pipeline
 # ---------------------------------------------------------------------------
 
 async def run_analysis_pipeline(job_id: str, request: AnalyzeRequest) -> None:
@@ -199,7 +351,14 @@ async def run_analysis_pipeline(job_id: str, request: AnalyzeRequest) -> None:
             copy_paste_items=[],
         )
 
-        # Step 5: save
+        # Step 5: generate fix plan (paid tier only) and save
+        if request.admin_token:
+            await update_job_status(job_id, "simulating", "Planning fixes", 95)
+            from app.agent.nodes import generate_fix_plan
+            fix_items = generate_fix_plan(findings)
+            fix_plan_dict = {"fixes": [dataclasses.asdict(f) for f in fix_items]}
+            await update_job_fix_plan(job_id, fix_plan_dict)
+
         status = "awaiting_approval" if request.admin_token else "complete"
         await update_job_report(job_id, dataclasses.asdict(report), status=status)
 

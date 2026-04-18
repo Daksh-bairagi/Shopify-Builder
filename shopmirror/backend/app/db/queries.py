@@ -160,7 +160,7 @@ async def get_fix_backup(fix_id: str) -> dict[str, Any] | None:
         """
         SELECT id::text, job_id::text, fix_id, product_id, field_type,
                field_key, original_value, new_value, shopify_gid,
-               applied_at, rolled_back
+               script_tag_id, applied_at, rolled_back
         FROM fix_backups
         WHERE fix_id = $1
         """,

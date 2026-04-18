@@ -92,12 +92,20 @@ class ExecuteRequest(BaseModel):
     """Request body for POST /jobs/{id}/execute."""
 
     approved_fix_ids: list[str] = Field(default_factory=list)
+    admin_token: str          # Required — not stored in DB, must be re-supplied by client
+    merchant_intent: str | None = None
 
 
 class ExecuteResponse(BaseModel):
     """Response body for POST /jobs/{id}/execute."""
 
     execution_job_id: str
+
+
+class RollbackRequest(BaseModel):
+    """Request body for POST /jobs/{id}/rollback/{fix_id}."""
+
+    admin_token: str
 
 
 class RollbackResponse(BaseModel):

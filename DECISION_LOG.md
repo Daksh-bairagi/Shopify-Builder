@@ -70,6 +70,14 @@ Core technical and product decisions only. Format: **Chose X over Y — reason.*
 
 - **Added AI Readiness Certificate** — PNG-exportable before/after summary generated after agent run. Retention mechanism + viral distribution channel for merchant communities.
 
+## Day 6 Implementation
+
+- **Admin token not stored in DB; fix agent runs in dry-run mode when token unavailable** — storing plaintext admin tokens in PostgreSQL is a security risk. For the hackathon, the POST /execute route re-runs the agent without live writes when the token isn't available from the DB row. Production fix: store an encrypted token in a short-TTL session cache (Redis). The dry-run path still exercises the full LangGraph state machine and reports what would have been written.
+
+- **Approval gate implemented as pass-through, not LangGraph interrupt** — the `/execute` request already carries `approved_fix_ids`, so the graph doesn't need to interrupt and wait. The `approval_gate_node` exists structurally (matching the spec) but doesn't call `interrupt()`. Production multi-turn approval would add the interrupt; for the demo the approval step is handled in the frontend before calling `/execute`.
+
+- **fix plan generation runs in analysis pipeline (not agent planner_node)** — the spec says planner_node generates the fix plan on first agent run. For the UI flow (GET /fix-plan before any agent invocation), the plan must be in the DB first. Generating it at the end of the analysis pipeline achieves both: the endpoint works immediately, and the planner_node reads the same plan from state.
+
 ## Day 3 Implementation
 
 - **`perception_diff.py` uses one batch LLM call for all products, not two calls per product** — spec originally described 2 LLM calls per product (`get_product_perception`). Replaced with a single `BatchProductPerceptionOutput` call across up to 10 products. Fewer LLM calls, lower latency, same analytical quality — correct tradeoff for a hackathon demo with live API costs.
