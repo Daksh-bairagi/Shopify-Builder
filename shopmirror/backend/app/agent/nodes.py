@@ -369,6 +369,7 @@ def _recompute_pillars(failing_check_ids: set[str]) -> dict:
 def _compute_before_after(
     original_report: dict,
     executed_fixes: list,
+    fix_type_map: dict[str, str],
 ) -> dict:
     """
     Compute before/after comparison from original findings and executed fixes.
@@ -389,11 +390,7 @@ def _compute_before_after(
 
         fix_id: str = fix_result.fix_id if hasattr(fix_result, "fix_id") else fix_result.get("fix_id", "")
 
-        fix_type = ""
-        for prefix in FIX_TYPE_RESOLVES:
-            if fix_id.startswith(prefix + "_") or fix_id == prefix:
-                fix_type = prefix
-                break
+        fix_type = fix_type_map.get(fix_id, "")
 
         if fix_type in FIX_TYPE_RESOLVES:
             resolved_check_ids.update(FIX_TYPE_RESOLVES[fix_type])
@@ -442,7 +439,9 @@ async def reporter_node(state: StoreOptimizationState) -> dict:
     except Exception:
         original_report = {}
 
-    before_after = _compute_before_after(original_report, executed)
+    fix_plan = state.get("fix_plan") or []
+    fix_type_map = {f.fix_id: f.type for f in fix_plan}
+    before_after = _compute_before_after(original_report, executed, fix_type_map)
     before_after["manual_action_items"] = [dataclasses.asdict(m) for m in manual]
 
     final_report = {
