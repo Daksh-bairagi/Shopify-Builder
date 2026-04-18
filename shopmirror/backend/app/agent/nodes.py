@@ -320,6 +320,110 @@ def route_after_verifier(
 
 
 # ---------------------------------------------------------------------------
+# Before/after computation
+# ---------------------------------------------------------------------------
+
+PILLAR_CHECKS_MAP: dict[str, list[str]] = {
+    "Discoverability":  ["D1a", "D1b", "D2", "D3", "D5"],
+    "Completeness":     ["C1", "C2", "C3", "C4", "C5", "C6"],
+    "Consistency":      ["Con1", "Con2", "Con3"],
+    "Trust_Policies":   ["T1", "T2", "T4"],
+    "Transaction":      ["A1", "A2"],
+}
+PILLAR_WEIGHTS: dict[str, float] = {
+    "Discoverability": 0.20,
+    "Completeness":    0.30,
+    "Consistency":     0.20,
+    "Trust_Policies":  0.15,
+    "Transaction":     0.15,
+}
+
+FIX_TYPE_RESOLVES: dict[str, list[str]] = {
+    "map_taxonomy":                ["D1b", "C1"],
+    "classify_product_type":       ["C1"],
+    "improve_title":               ["C2"],
+    "fill_metafield":              ["C3", "C4", "C5", "C6", "Con2", "Con3"],
+    "generate_alt_text":           ["C6"],
+    "inject_schema_script":        ["Con1", "T4"],
+    "generate_schema_snippet":     ["T4"],
+    "suggest_policy_fix":          ["T1", "T2"],
+    "create_metafield_definitions": ["C5"],
+}
+
+
+def _recompute_pillars(failing_check_ids: set[str]) -> dict:
+    """Re-compute pillar scores given the set of still-failing check_ids."""
+    result = {}
+    for pillar, checks in PILLAR_CHECKS_MAP.items():
+        total = len(checks)
+        still_failing = {c for c in checks if c in failing_check_ids}
+        passed = total - len(still_failing)
+        result[pillar] = {
+            "score": passed / total if total else 1.0,
+            "checks_passed": passed,
+            "checks_total": total,
+        }
+    return result
+
+
+def _compute_before_after(
+    original_report: dict,
+    executed_fixes: list,
+) -> dict:
+    """
+    Compute before/after comparison from original findings and executed fixes.
+    Returns a dict matching BeforeAfterResponse schema.
+    """
+    original_findings = original_report.get("findings") or []
+    original_pillar_dict = original_report.get("pillars") or {}
+
+    original_failing: set[str] = {f.get("check_id", "") for f in original_findings}
+
+    resolved_check_ids: set[str] = set()
+    copy_paste_items: list[dict] = []
+
+    for fix_result in executed_fixes:
+        success = fix_result.success if hasattr(fix_result, "success") else fix_result.get("success", False)
+        if not success:
+            continue
+
+        fix_id: str = fix_result.fix_id if hasattr(fix_result, "fix_id") else fix_result.get("fix_id", "")
+
+        fix_type = ""
+        for prefix in FIX_TYPE_RESOLVES:
+            if fix_id.startswith(prefix + "_") or fix_id == prefix:
+                fix_type = prefix
+                break
+
+        if fix_type in FIX_TYPE_RESOLVES:
+            resolved_check_ids.update(FIX_TYPE_RESOLVES[fix_type])
+
+        content = fix_result.shopify_gid if hasattr(fix_result, "shopify_gid") else (fix_result.get("shopify_gid") or "")
+        if content and fix_type in ("generate_schema_snippet", "suggest_policy_fix"):
+            label = "JSON-LD Schema Snippet" if fix_type == "generate_schema_snippet" else "Policy Draft"
+            copy_paste_items.append({"label": label, "content": content, "fix_id": fix_id})
+
+    current_failing = original_failing - resolved_check_ids
+    current_pillars = _recompute_pillars(current_failing)
+
+    checks_improved = sorted(original_failing & resolved_check_ids)
+    checks_unchanged = sorted(original_failing - resolved_check_ids)
+
+    mcp_before = original_report.get("mcp_simulation")
+
+    return {
+        "original_pillars": original_pillar_dict,
+        "current_pillars": current_pillars,
+        "checks_improved": checks_improved,
+        "checks_unchanged": checks_unchanged,
+        "mcp_before": mcp_before,
+        "mcp_after": None,
+        "manual_action_items": [],
+        "copy_paste_items": copy_paste_items,
+    }
+
+
+# ---------------------------------------------------------------------------
 # reporter_node
 # ---------------------------------------------------------------------------
 
@@ -338,6 +442,9 @@ async def reporter_node(state: StoreOptimizationState) -> dict:
     except Exception:
         original_report = {}
 
+    before_after = _compute_before_after(original_report, executed)
+    before_after["manual_action_items"] = [dataclasses.asdict(m) for m in manual]
+
     final_report = {
         **original_report,
         "agent_run": {
@@ -347,7 +454,9 @@ async def reporter_node(state: StoreOptimizationState) -> dict:
             "executed_fixes": [dataclasses.asdict(r) for r in executed],
             "failed_fixes": [dataclasses.asdict(r) for r in failed],
             "verification_results": state.get("verification_results") or {},
+            "before_after": before_after,
         },
+        "copy_paste_package": before_after.get("copy_paste_items", []),
     }
 
     try:
