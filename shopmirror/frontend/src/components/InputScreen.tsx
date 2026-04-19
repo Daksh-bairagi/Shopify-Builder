@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { AnalyzeRequest } from '../api/client'
+import { ShaderAnimation } from './ui/shader-animation'
 
 interface Props {
   onSubmit: (req: AnalyzeRequest) => void
@@ -88,17 +89,11 @@ export default function InputScreen({ onSubmit, error }: Props) {
       {/* ── Left panel: value proposition ─────────────────────────────── */}
       <div className="hidden lg:flex flex-col justify-between w-[52%] px-16 py-14 relative overflow-hidden">
 
-        {/* Aurora background blobs */}
-        <div className="pointer-events-none absolute inset-0">
-          <div
-            className="absolute -top-32 -left-32 w-[500px] h-[500px] rounded-full opacity-20"
-            style={{ background: 'radial-gradient(circle, #3B82F6 0%, transparent 70%)' }}
-          />
-          <div
-            className="absolute bottom-0 right-0 w-[400px] h-[400px] rounded-full opacity-10"
-            style={{ background: 'radial-gradient(circle, #F59E0B 0%, transparent 70%)' }}
-          />
-        </div>
+        {/* Shader animation background */}
+        <ShaderAnimation />
+
+        {/* Dark overlay so text stays readable over the shader */}
+        <div className="pointer-events-none absolute inset-0 bg-[#0A0E27]/60" />
 
         {/* Logo */}
         <div className="relative z-10">
