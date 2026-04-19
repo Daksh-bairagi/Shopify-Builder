@@ -32,6 +32,32 @@ Do NOT log: version bumps, minor code style choices, tooling config, file organi
 
 Entry format: `**Chose X over Y — reason.**` One entry per decision, 1–2 sentences max.
 
+## Session Protocol — Hard Rules, Every Session
+
+### On Session Start (BEFORE reading any code file)
+1. The session-start system-reminder already shows a claude-mem timeline with observation IDs.
+2. **Call `get_observations([IDs])` on the most recent 3–5 IDs** to load full context from memory instead of re-reading source files. This is the token-efficient path — 300 tokens/observation vs thousands for file reads.
+3. Only read source files if the observations don't cover the specific detail needed.
+
+```
+get_observations([most_recent_IDs_from_timeline])
+```
+
+### Before Claiming Any Work Complete (BEFORE every commit)
+1. **Invoke `superpowers:verification-before-completion`** — no exceptions.
+2. Run the actual verification command (e.g. `npx tsc --noEmit`, `pytest`, build check).
+3. Read the full output and exit code.
+4. Only state "done" after evidence confirms it.
+
+### Before Any Feature / Creative Work
+- Invoke `superpowers:brainstorming` if requirements are unclear.
+- Invoke `superpowers:systematic-debugging` before proposing any bug fix.
+
+### Why These Are Hard Rules
+Skipping session-start memory loading wastes 10–50k tokens re-reading files that are already captured as observations. Skipping verification-before-completion produces false completion claims. Both have happened — they are not acceptable defaults.
+
+---
+
 ## Hard Rules — Never Break These
 - Always read both spec files before writing any code
 - Never deviate from directory structure in TECHSPEC Section 1
