@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { AnalyzeRequest } from '../api/client'
 import { ShaderAnimation } from './ui/shader-animation'
+import { SplineScene } from './ui/splite'
+import { Spotlight } from './ui/spotlight'
 
 interface Props {
   onSubmit: (req: AnalyzeRequest) => void
@@ -89,11 +91,14 @@ export default function InputScreen({ onSubmit, error }: Props) {
       {/* ── Left panel: value proposition ─────────────────────────────── */}
       <div className="hidden lg:flex flex-col justify-between w-[52%] px-16 py-14 relative overflow-hidden">
 
-        {/* Shader animation background */}
+        {/* Shader animation — base background layer */}
         <ShaderAnimation />
 
-        {/* Dark overlay so text stays readable over the shader */}
-        <div className="pointer-events-none absolute inset-0 bg-[#0A0E27]/60" />
+        {/* Dark overlay so text stays readable */}
+        <div className="pointer-events-none absolute inset-0 bg-[#0A0E27]/70" />
+
+        {/* Spotlight sweep */}
+        <Spotlight className="-top-40 left-0 md:left-40 md:-top-20" fill="#60A5FA" />
 
         {/* Logo */}
         <div className="relative z-10">
@@ -138,22 +143,12 @@ export default function InputScreen({ onSubmit, error }: Props) {
             ))}
           </div>
 
-          {/* Feature cards */}
-          <div className="space-y-3">
-            {FEATURES.map((f) => (
-              <div
-                key={f.title}
-                className="flex items-start gap-4 bg-[#141830] border border-[#1E2545] rounded-xl p-4"
-              >
-                <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0 mt-0.5">
-                  {f.icon}
-                </div>
-                <div>
-                  <div className="text-white text-sm font-semibold">{f.title}</div>
-                  <div className="text-[#4B5A8A] text-xs mt-1 leading-relaxed">{f.desc}</div>
-                </div>
-              </div>
-            ))}
+          {/* 3D Spline scene */}
+          <div className="relative w-full h-64 rounded-2xl overflow-hidden border border-[#1E2545]/60">
+            <SplineScene
+              scene="https://prod.spline.design/kZDDjO5HuC9GJUM2/scene.splinecode"
+              className="w-full h-full"
+            />
           </div>
         </div>
 
