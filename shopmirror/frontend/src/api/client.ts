@@ -180,6 +180,7 @@ export interface AuditReport {
   pillars: Record<string, PillarScore>
   findings: Finding[]
   worst_5_products: ProductSummary[]
+  all_products?: ProductSummary[]
   channel_compliance: ChannelCompliance
   perception_diff: PerceptionDiff | null
   product_perceptions: ProductPerception[]

@@ -181,7 +181,8 @@ async def assemble_report(
         pillar_scores = calculate_pillar_scores(findings)
         ai_readiness_score = calculate_ai_readiness_score(pillar_scores)
         channel_compliance = calculate_channel_compliance(findings)
-        worst_5_products = get_worst_products(merchant_data.products, findings, n=5)
+        all_products = get_worst_products(merchant_data.products, findings, n=len(merchant_data.products))
+        worst_5_products = all_products[:5]
 
         return AuditReport(
             store_name=merchant_data.store_name,
@@ -192,6 +193,7 @@ async def assemble_report(
             pillars=pillar_scores,
             findings=findings,
             worst_5_products=worst_5_products,
+            all_products=all_products,
             channel_compliance=channel_compliance,
             perception_diff=perception_diff,
             product_perceptions=product_perceptions or [],
@@ -212,6 +214,7 @@ async def assemble_report(
             pillars={},
             findings=findings,
             worst_5_products=[],
+            all_products=[],
             channel_compliance=ChannelCompliance(
                 shopify_catalog=default_channel,
                 google_shopping=default_channel,

@@ -119,6 +119,7 @@ class AuditReport:
     pillars: dict[str, PillarScore]  # pillar name -> PillarScore
     findings: list[Finding]
     worst_5_products: list[ProductSummary]
+    all_products: list[ProductSummary]   # all products sorted by gap_score desc — used for heatmap
     channel_compliance: ChannelCompliance
     perception_diff: Optional[PerceptionDiff]
     product_perceptions: list[ProductPerception]

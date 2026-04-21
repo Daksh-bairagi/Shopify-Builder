@@ -128,14 +128,46 @@ async def query_match(job_id: str, query: str) -> QueryMatchResponse:
     if report_json is None:
         raise HTTPException(status_code=400, detail="Job not yet complete")
 
-    # Stub: full query-match logic deferred to Day 5 integration when
-    # live merchant_data is available in-memory.
+    # Try to find the closest pre-computed query match result from the stored report.
+    # Full re-matching requires live product data (not stored in DB), so we fall back
+    # to keyword matching against product titles from all_products in the stored report.
+    precomputed: list[dict] = report_json.get("query_match_results") or []
+    all_products: list[dict] = report_json.get("all_products") or report_json.get("worst_5_products") or []
+    total_products: int = report_json.get("total_products", 0)
+
+    # Check if any pre-computed result contains the query as a substring (case-insensitive)
+    query_lower = query.lower()
+    for result in precomputed:
+        if query_lower in result.get("query", "").lower():
+            return QueryMatchResponse(
+                query=query,
+                matched_product_ids=result.get("matched_product_ids", []),
+                total_products=result.get("total_products", total_products),
+                match_count=result.get("match_count", 0),
+                failing_attributes=result.get("failing_attributes", {}),
+            )
+
+    # Fallback: lightweight title-based match from stored product summaries
+    query_words = [w for w in query_lower.split() if len(w) > 2]
+    matched_ids: list[str] = []
+    failing_attrs: dict[str, int] = {}
+    for p in all_products:
+        title_lower = p.get("title", "").lower()
+        failing_checks = set(p.get("failing_check_ids", []))
+        if any(w in title_lower for w in query_words):
+            # Only "match" if product isn't failing C1/C2 (product type + title)
+            if "C1" not in failing_checks and "C2" not in failing_checks:
+                matched_ids.append(p["product_id"])
+            else:
+                for cid in failing_checks:
+                    failing_attrs[cid] = failing_attrs.get(cid, 0) + 1
+
     return QueryMatchResponse(
         query=query,
-        matched_product_ids=[],
-        total_products=report_json.get("total_products", 0),
-        match_count=0,
-        failing_attributes={},
+        matched_product_ids=matched_ids,
+        total_products=total_products,
+        match_count=len(matched_ids),
+        failing_attributes=failing_attrs,
     )
 
 

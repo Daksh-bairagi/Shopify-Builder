@@ -7,6 +7,7 @@ import FixApproval from './FixApproval'
 import AgentActivity from './AgentActivity'
 import BeforeAfterReport from './BeforeAfterReport'
 import ReadinessCertificate from './ReadinessCertificate'
+import HeatmapGrid from './HeatmapGrid'
 
 interface Props {
   report: AuditReport
@@ -291,6 +292,21 @@ export default function Dashboard({ report, jobId, adminToken, onReset, onExecut
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Product Completeness Heatmap */}
+        {(report.all_products ?? report.worst_5_products).length > 0 && (
+          <div className="mt-8">
+            <h2 className="text-sm font-code text-[#4B5A8A] uppercase tracking-widest mb-4">
+              Product Completeness Heatmap
+            </h2>
+            <div className="card p-5">
+              <HeatmapGrid
+                products={report.all_products ?? report.worst_5_products}
+                findings={report.findings}
+              />
             </div>
           </div>
         )}
