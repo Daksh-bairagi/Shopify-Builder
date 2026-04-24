@@ -16,7 +16,7 @@ export interface JobProgress {
 }
 
 export interface JobStatusResponse {
-  status: 'pending' | 'ingesting' | 'auditing' | 'simulating' | 'complete' | 'awaiting_approval' | 'error'
+  status: 'pending' | 'ingesting' | 'auditing' | 'simulating' | 'complete' | 'awaiting_approval' | 'executing' | 'failed' | 'error'
   progress: JobProgress
   report: AuditReport | null
   error: string | null

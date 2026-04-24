@@ -4,6 +4,12 @@ from typing import Any
 from app.db.connection import get_pool
 
 
+def _parse_jsonb(value: Any) -> Any:
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
@@ -34,8 +40,8 @@ async def update_job_status(
     await pool.execute(
         """
         UPDATE analysis_jobs
-        SET status        = $2,
-            progress_step = COALESCE($3, progress_step),
+        SET status        = $2::varchar,
+            progress_step = COALESCE($3::varchar, progress_step),
             progress_pct  = COALESCE($4, progress_pct)
         WHERE id = $1::uuid
         """,
@@ -59,9 +65,9 @@ async def update_job_report(
         """
         UPDATE analysis_jobs
         SET report_json  = $2::jsonb,
-            status       = $3,
+            status       = $3::varchar,
             progress_pct = 100,
-            completed_at = CASE WHEN $3 = 'complete' THEN NOW() ELSE NULL END
+            completed_at = CASE WHEN $3::text = 'complete' THEN NOW() ELSE NULL END
         WHERE id = $1::uuid
         """,
         job_id,
@@ -114,7 +120,10 @@ async def get_job(job_id: str) -> dict[str, Any] | None:
     )
     if row is None:
         return None
-    return dict(row)
+    result = dict(row)
+    result["report_json"] = _parse_jsonb(result.get("report_json"))
+    result["fix_plan_json"] = _parse_jsonb(result.get("fix_plan_json"))
+    return result
 
 
 # ---------------------------------------------------------------------------

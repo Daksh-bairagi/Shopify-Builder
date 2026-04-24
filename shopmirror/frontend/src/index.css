@@ -2,39 +2,126 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── ShopMirror Theme ───────────────────────────────────────────────────── */
+:root {
+  --card: #ffffff;
+  --ring: #8a79ab;
+  --input: #eae7f0;
+  --muted: #dcd9e3;
+  --accent: #e6a5b8;
+  --border: #cec9d9;
+  --radius: 0.5rem;
+  --chart-1: #8a79ab;
+  --chart-2: #e6a5b8;
+  --chart-3: #77b8a1;
+  --chart-4: #f0c88d;
+  --chart-5: #a0bbe3;
+  --popover: #ffffff;
+  --primary: #8a79ab;
+  --sidebar: #f1eff5;
+  --spacing: 0.25rem;
+  --font-mono: "Fira Code", "Courier New", monospace;
+  --font-sans: "Inter", "Geist", sans-serif;
+  --secondary: #dfd9ec;
+  --background: #f8f7fa;
+  --font-serif: "Lora", Georgia, serif;
+  --foreground: #3d3c4f;
+  --destructive: #d95c5c;
+  --shadow-blur: 5px;
+  --shadow-color: hsl(0 0% 0%);
+  --sidebar-ring: #8a79ab;
+  --shadow-spread: 1px;
+  --letter-spacing: 0em;
+  --shadow-opacity: 0.06;
+  --sidebar-accent: #e6a5b8;
+  --sidebar-border: #d7d2e0;
+  --card-foreground: #3d3c4f;
+  --shadow-offset-x: 1px;
+  --shadow-offset-y: 2px;
+  --sidebar-primary: #8a79ab;
+  --muted-foreground: #6b6880;
+  --accent-foreground: #4b2e36;
+  --popover-foreground: #3d3c4f;
+  --primary-foreground: #f8f7fa;
+  --sidebar-foreground: #3d3c4f;
+  --secondary-foreground: #3d3c4f;
+  --destructive-foreground: #f8f7fa;
+  --sidebar-accent-foreground: #4b2e36;
+  --sidebar-primary-foreground: #f8f7fa;
+}
+
+.dark {
+  --card: #232030;
+  --ring: #a995c9;
+  --input: #2a273a;
+  --muted: #242031;
+  --accent: #372e3f;
+  --border: #302c40;
+  --chart-1: #a995c9;
+  --chart-2: #f2b8c6;
+  --chart-3: #77b8a1;
+  --chart-4: #f0c88d;
+  --chart-5: #a0bbe3;
+  --popover: #232030;
+  --primary: #a995c9;
+  --sidebar: #16141e;
+  --secondary: #5a5370;
+  --background: #1a1823;
+  --foreground: #e0ddef;
+  --destructive: #e57373;
+  --sidebar-ring: #a995c9;
+  --sidebar-accent: #372e3f;
+  --sidebar-border: #2a273a;
+  --card-foreground: #e0ddef;
+  --sidebar-primary: #a995c9;
+  --muted-foreground: #a09aad;
+  --accent-foreground: #f2b8c6;
+  --popover-foreground: #e0ddef;
+  --primary-foreground: #1a1823;
+  --sidebar-foreground: #e0ddef;
+  --secondary-foreground: #e0ddef;
+  --destructive-foreground: #1a1823;
+  --sidebar-accent-foreground: #f2b8c6;
+  --sidebar-primary-foreground: #1a1823;
+}
+
 @layer base {
   html {
     color-scheme: dark;
   }
   body {
-    background-color: #0A0E27;
-    color: #e2e8f0;
-    font-family: 'Fira Sans', system-ui, sans-serif;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Fira Code', monospace;
+    font-family: var(--font-sans);
   }
 }
 
+/* ── App-shell utilities (used by Dashboard / ProgressScreen) ───────────── */
 @layer utilities {
+  .font-code {
+    font-family: var(--font-mono);
+  }
   .glow-score {
-    text-shadow: 0 0 40px rgba(245, 158, 11, 0.6), 0 0 80px rgba(245, 158, 11, 0.2);
+    text-shadow: 0 0 40px rgba(169, 149, 201, 0.6), 0 0 80px rgba(169, 149, 201, 0.2);
   }
   .glow-blue {
-    text-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+    text-shadow: 0 0 20px rgba(169, 149, 201, 0.5);
   }
   .card {
-    background-color: #141830;
-    border: 1px solid #1E2545;
+    background-color: var(--card);
+    border: 1px solid var(--border);
     border-radius: 1rem;
   }
   .card-hover {
     transition: all 200ms ease;
   }
   .card-hover:hover {
-    border-color: rgba(59, 130, 246, 0.4);
-    box-shadow: 0 4px 24px rgba(59, 130, 246, 0.15);
+    border-color: rgba(169, 149, 201, 0.4);
+    box-shadow: 0 4px 24px rgba(169, 149, 201, 0.15);
     transform: translateY(-1px);
   }
   @media (prefers-reduced-motion: reduce) {
@@ -43,4 +130,20 @@
       transition-duration: 0.01ms !important;
     }
   }
+}
+
+/* ── CSS-only ambient blobs (replaces WebGL shader for background FX) ─────── */
+@keyframes blobDrift {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  33%       { transform: translate(40px, -60px) scale(1.06); }
+  66%       { transform: translate(-30px, 30px) scale(0.94); }
+}
+@keyframes blobDriftB {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  40%       { transform: translate(-50px, 40px) scale(1.08); }
+  75%       { transform: translate(35px, -25px) scale(0.96); }
+}
+@keyframes blobDriftC {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  50%       { transform: translate(25px, 55px) scale(1.04); }
 }

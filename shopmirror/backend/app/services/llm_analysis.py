@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Optional
 
+import os
 from pydantic import BaseModel
-from langchain_google_vertexai import ChatVertexAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 
 from app.models.merchant import Product
@@ -33,7 +34,7 @@ _structured_llm_instance = None
 def _get_structured_llm():
     global _structured_llm_instance
     if _structured_llm_instance is None:
-        _llm = ChatVertexAI(model="gemini-2.0-flash", temperature=0)
+        _llm = ChatGoogleGenerativeAI(model=os.environ.get("VERTEX_MODEL", "gemini-2.5-flash"), temperature=0, google_api_key=os.environ.get("GEMINI_API_KEY"))
         _structured_llm_instance = _llm.with_structured_output(BatchTitleAnalysisResult)
     return _structured_llm_instance
 

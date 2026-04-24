@@ -2,21 +2,22 @@ from __future__ import annotations
 
 from collections import Counter
 
+import os
 from pydantic import BaseModel
-from langchain_google_vertexai import ChatVertexAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 
 from app.models.merchant import MerchantData, Product
 from app.models.findings import Finding, PerceptionDiff, ProductPerception
 
 # --- Module-level LLM cache (lazy-initialized) ---
-_llm: ChatVertexAI | None = None
+_llm: ChatGoogleGenerativeAI | None = None
 
 
-def _get_llm() -> ChatVertexAI:
+def _get_llm() -> ChatGoogleGenerativeAI:
     global _llm
     if _llm is None:
-        _llm = ChatVertexAI(model="gemini-2.0-flash", temperature=0)
+        _llm = ChatGoogleGenerativeAI(model=os.environ.get("VERTEX_MODEL", "gemini-2.5-flash"), temperature=0, google_api_key=os.environ.get("GEMINI_API_KEY"))
     return _llm
 
 

@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
 import { api, AuditReport, JobStatusResponse, AnalyzeRequest } from './api/client'
+import LandingPage from './components/LandingPage'
 import InputScreen from './components/InputScreen'
 import ProgressScreen from './components/ProgressScreen'
 import Dashboard from './components/Dashboard'
 
-type Screen = 'input' | 'progress' | 'dashboard' | 'executing'
+type Screen = 'landing' | 'input' | 'progress' | 'dashboard' | 'executing'
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>('input')
+  const [screen, setScreen] = useState<Screen>('landing')
   const [jobId, setJobId] = useState<string | null>(null)
   const [adminToken, setAdminToken] = useState<string | null>(null)
   const [merchantIntent, setMerchantIntent] = useState<string | null>(null)
@@ -33,7 +34,7 @@ export default function App() {
         setJobStatus(status)
         if (terminalStatuses.includes(status.status)) {
           stopPolling()
-          if (status.status === 'error') {
+          if (status.status === 'error' || status.status === 'failed') {
             setError(status.error ?? 'Analysis failed')
             setScreen('input')
           } else {
@@ -57,7 +58,7 @@ export default function App() {
       const { job_id } = await api.analyze(req)
       setJobId(job_id)
       setScreen('progress')
-      startPolling(job_id, ['complete', 'awaiting_approval', 'error'])
+      startPolling(job_id, ['complete', 'awaiting_approval', 'failed', 'error'])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start analysis')
     }
@@ -76,7 +77,7 @@ export default function App() {
 
   const handleReset = () => {
     stopPolling()
-    setScreen('input')
+    setScreen('landing')
     setJobId(null)
     setAdminToken(null)
     setMerchantIntent(null)
@@ -97,12 +98,15 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
+    <div className="min-h-screen bg-background text-foreground">
+      {screen === 'landing' && (
+        <LandingPage onGetStarted={() => setScreen('input')} />
+      )}
       {screen === 'input' && (
         <InputScreen onSubmit={handleSubmit} error={error} />
       )}
-      {screen === 'progress' && jobStatus && (
-        <ProgressScreen status={jobStatus} />
+      {screen === 'progress' && (
+        <ProgressScreen status={jobStatus ?? { status: 'ingesting', progress: { step: 'Starting analysis...', pct: 0 }, report: null, error: null }} />
       )}
       {screen === 'executing' && (
         <ProgressScreen status={executingStatus} />
