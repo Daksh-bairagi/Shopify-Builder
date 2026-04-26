@@ -2,13 +2,14 @@
 agent/tools.py — Executor tool functions for the fix agent.
 
 Each tool is a plain async function that takes the state and the FixItem
-to execute. Returns an updated FixResult. LLM calls use ChatVertexAI +
+to execute. Returns an updated FixResult. LLM calls use Gemini API key +
 with_structured_output, same pattern as other services.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import datetime
 from typing import Optional
@@ -31,8 +32,12 @@ _llm_cache: dict = {}
 def _get_llm(schema_class):
     key = schema_class.__name__
     if key not in _llm_cache:
-        from langchain_google_vertexai import ChatVertexAI
-        llm = ChatVertexAI(model="gemini-2.0-flash", temperature=0)
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        llm = ChatGoogleGenerativeAI(
+            model=os.environ.get("VERTEX_MODEL", "gemini-2.5-flash"),
+            temperature=0,
+            google_api_key=os.environ.get("GEMINI_API_KEY"),
+        )
         _llm_cache[key] = llm.with_structured_output(schema_class)
     return _llm_cache[key]
 
@@ -396,8 +401,11 @@ async def inject_schema_script(
     admin_token: str,
     job_id: str,
 ) -> FixResult:
-    """Inject a JSON-LD schema script tag that adds MerchantReturnPolicy +
-    OfferShippingDetails to all pages. Generates schema from store policies.
+    """Generate store-level JSON-LD for manual installation.
+
+    Shopify ScriptTagInput.src requires a hosted HTTPS JavaScript URL; it rejects
+    inline data: URLs. Until the app has a hosted script asset or theme-file
+    writer, return the schema as a copy-paste fix instead of attempting a write.
     """
     try:
         refund_days = 30  # default
@@ -422,19 +430,14 @@ async def inject_schema_script(
         }
 
         import json
-        schema_json = json.dumps(schema)
-
-        gid = await shopify_writer.inject_schema_script(
-            store_data.store_domain,
-            admin_token,
-            schema_json,
-            job_id,
-            fix_item.fix_id,
+        return FixResult(
+            fix_id=fix_item.fix_id,
+            success=True,
+            error=None,
+            shopify_gid=json.dumps(schema, indent=2),
+            script_tag_id=None,
+            applied_at=datetime.utcnow(),
         )
-
-        result = _ok(fix_item.fix_id, gid)
-        result.script_tag_id = gid
-        return result
     except Exception as exc:
         logger.error("inject_schema_script failed: %s", exc)
         return _fail(fix_item.fix_id, str(exc))

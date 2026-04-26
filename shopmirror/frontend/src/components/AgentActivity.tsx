@@ -5,49 +5,75 @@ interface Props {
 }
 
 const FIX_TYPE_LABELS: Record<string, string> = {
-  improve_title: 'Improve Title',
-  map_taxonomy: 'Map Taxonomy',
-  classify_product_type: 'Set Product Type',
-  fill_metafield: 'Fill Metafield',
-  generate_alt_text: 'Generate Alt Text',
-  create_metafield_definitions: 'Create Metafield Definitions',
-  inject_schema_script: 'Inject Schema (Script Tag)',
-  generate_schema_snippet: 'Generate Schema Snippet',
-  suggest_policy_fix: 'Draft Policy',
+  improve_title:               'Improved product title',
+  map_taxonomy:                'Mapped product to Shopify taxonomy',
+  classify_product_type:       'Set product type category',
+  fill_metafield:              'Filled in product attributes',
+  generate_alt_text:           'Generated image alt text',
+  create_metafield_definitions:'Created structured attribute definitions',
+  inject_schema_script:        'Injected AI-readable schema markup',
+  generate_schema_snippet:     'Generated schema markup snippet',
+  suggest_policy_fix:          'Drafted policy improvements',
 }
 
 function fixLabel(fixId: string): string {
   for (const [prefix, label] of Object.entries(FIX_TYPE_LABELS)) {
     if (fixId.startsWith(prefix)) return label
   }
-  return fixId
+  // Fall back to a readable form of the first segment
+  const firstSegment = fixId.split('_').slice(0, 2).join(' ')
+  return firstSegment.charAt(0).toUpperCase() + firstSegment.slice(1)
+}
+
+function productFromFixId(fixId: string): string | null {
+  // fix_ids look like "improve_title_prod-12345_abc" — extract nothing user-facing
+  return null
 }
 
 function FixRow({ result }: { result: FixResult }) {
+  const label = fixLabel(result.fix_id)
   return (
-    <div className={`flex items-start gap-3 p-3 rounded-lg border ${result.success ? 'border-blue-500/20 bg-blue-500/5' : 'border-red-500/20 bg-red-500/5'}`}>
-      <div className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center mt-0.5 ${result.success ? 'bg-blue-600' : 'bg-red-600'}`}>
+    <div style={{
+      display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 16px',
+      borderRadius: 12, border: `1px solid ${result.success ? 'rgba(143,184,154,0.2)' : 'rgba(213,122,120,0.2)'}`,
+      background: result.success ? 'rgba(143,184,154,0.05)' : 'rgba(213,122,120,0.05)',
+    }}>
+      {/* Status icon */}
+      <div style={{
+        width: 22, height: 22, borderRadius: '50%', flexShrink: 0, marginTop: 1,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: result.success ? 'var(--m-good)' : 'var(--m-bad)',
+      }}>
         {result.success ? (
-          <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
           </svg>
         ) : (
-          <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         )}
       </div>
-      <div className="min-w-0 flex-1">
-        <p className={`text-sm font-medium ${result.success ? 'text-white' : 'text-red-300'}`}>
-          {fixLabel(result.fix_id)}
+
+      {/* Content */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: result.success ? 'var(--m-fg)' : 'var(--m-bad)' }}>
+          {label}
         </p>
         {result.error && (
-          <p className="text-xs text-red-400 mt-0.5 truncate">{result.error}</p>
+          <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--m-bad)', fontFamily: 'var(--font-geist)' }}>
+            {result.error}
+          </p>
         )}
-        <p className="text-xs text-[#4B5A8A] font-code mt-0.5 truncate">{result.fix_id}</p>
       </div>
-      <span className={`shrink-0 text-xs font-code ${result.success ? 'text-blue-400' : 'text-red-400'}`}>
-        {result.success ? 'DONE' : 'FAIL'}
+
+      {/* Status badge */}
+      <span style={{
+        flexShrink: 0, fontFamily: 'var(--font-geist-mono)', fontSize: 10,
+        letterSpacing: '0.08em', textTransform: 'uppercase', paddingTop: 3,
+        color: result.success ? 'var(--m-good)' : 'var(--m-bad)',
+      }}>
+        {result.success ? 'Applied' : 'Skipped'}
       </span>
     </div>
   )
@@ -55,40 +81,55 @@ function FixRow({ result }: { result: FixResult }) {
 
 export default function AgentActivity({ agentRun }: Props) {
   const all = [...agentRun.executed_fixes, ...agentRun.failed_fixes]
+  const appliedCount = agentRun.fixes_applied
+  const failedCount  = agentRun.fixes_failed
+  const manualCount  = agentRun.manual_action_items.length
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-4">
-        <div className="text-center">
-          <div className="text-2xl font-bold text-blue-400">{agentRun.fixes_applied}</div>
-          <div className="text-xs text-[#4B5A8A]">fixes applied</div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+
+      {/* Summary counters */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12,
+        padding: '20px 24px', background: 'var(--ink-2)',
+        border: '1px solid var(--ink-line)', borderRadius: 16,
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 42, lineHeight: 1, color: 'var(--m-good)' }}>{appliedCount}</div>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--m-fg-3)', marginTop: 6, letterSpacing: '0.1em', textTransform: 'uppercase' }}>fixes applied</div>
         </div>
-        <div className="h-8 w-px bg-[#1E2545]" />
-        <div className="text-center">
-          <div className="text-2xl font-bold text-red-400">{agentRun.fixes_failed}</div>
-          <div className="text-xs text-[#4B5A8A]">failed</div>
+        <div style={{ textAlign: 'center', borderLeft: '1px solid var(--ink-line)', borderRight: '1px solid var(--ink-line)' }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 42, lineHeight: 1, color: manualCount > 0 ? 'var(--m-warn)' : 'var(--m-fg-3)' }}>{manualCount}</div>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--m-fg-3)', marginTop: 6, letterSpacing: '0.1em', textTransform: 'uppercase' }}>need your action</div>
         </div>
-        <div className="h-8 w-px bg-[#1E2545]" />
-        <div className="text-center">
-          <div className="text-2xl font-bold text-amber-400">{agentRun.manual_action_items.length}</div>
-          <div className="text-xs text-[#4B5A8A]">manual actions</div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 42, lineHeight: 1, color: failedCount > 0 ? 'var(--m-bad)' : 'var(--m-fg-3)' }}>{failedCount}</div>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--m-fg-3)', marginTop: 6, letterSpacing: '0.1em', textTransform: 'uppercase' }}>could not apply</div>
         </div>
       </div>
 
+      {/* Fix results list */}
       {all.length > 0 && (
-        <div className="space-y-2">
-          {all.map((r, i) => <FixRow key={i} result={r} />)}
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 16 }}>What was changed</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {all.map((r, i) => <FixRow key={i} result={r} />)}
+          </div>
         </div>
       )}
 
+      {/* Manual action items */}
       {agentRun.manual_action_items.length > 0 && (
         <div>
-          <p className="text-xs font-code text-[#4B5A8A] uppercase tracking-widest mb-2">Needs Manual Action</p>
-          <div className="space-y-2">
+          <div className="eyebrow" style={{ marginBottom: 16 }}>Still needs your attention</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {agentRun.manual_action_items.map((item, i) => (
-              <div key={i} className="card p-4 border-amber-500/20">
-                <p className="text-amber-400 text-sm font-medium">{item.title}</p>
-                <p className="text-[#6B7DB3] text-xs mt-1">{item.fix_instruction}</p>
+              <div key={i} style={{
+                background: 'var(--ink-2)', border: '1px solid rgba(212,169,107,0.2)',
+                borderRadius: 14, padding: '16px 20px',
+              }}>
+                <p style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 500, color: 'var(--m-warn)' }}>{item.title}</p>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--m-fg-2)', lineHeight: 1.5 }}>{item.fix_instruction}</p>
               </div>
             ))}
           </div>

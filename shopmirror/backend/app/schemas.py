@@ -136,3 +136,32 @@ class QueryMatchResponse(BaseModel):
     total_products: int
     match_count: int
     failing_attributes: dict[str, int] = Field(default_factory=dict)
+
+
+# =====================================================================
+# AI Visibility extensions (April 2026)
+# =====================================================================
+
+class AIVisibilityRequest(BaseModel):
+    """Body for POST /jobs/{id}/ai-visibility — run live multi-LLM probe."""
+
+    prompts: list[str] | None = None
+    providers: list[str] = Field(default_factory=lambda: ["gemini"])
+    admin_token: str | None = None    # optional re-ingest auth for richer catalog
+
+
+class CopyRewriteRequest(BaseModel):
+    """Body for POST /jobs/{id}/copy-rewrite — per-channel rewriting."""
+
+    limit: int = 10
+    channels: list[str] | None = None
+    product_ids: list[str] | None = None
+    admin_token: str | None = None
+
+
+class FAQRequest(BaseModel):
+    """Body for POST /jobs/{id}/faq-schema — FAQPage JSON-LD generation."""
+
+    limit: int = 10
+    product_ids: list[str] | None = None
+    admin_token: str | None = None

@@ -16,6 +16,29 @@ const PILLAR_LABELS: Record<string, string> = {
   Transaction: 'Transaction',
 }
 
+// Human-readable names for check IDs shown in "Checks Improved" / "Still Failing"
+const CHECK_LABELS: Record<string, string> = {
+  D1a: 'AI bot crawl access',
+  D1b: 'Shopify Catalog eligibility',
+  D2:  'Sitemap with product URLs',
+  D3:  'llms.txt AI guidance file',
+  D5:  'Translated product content',
+  C1:  'Product taxonomy mapped',
+  C2:  'Category noun in title',
+  C3:  'Variant options named',
+  C4:  'Product identifier (GTIN/SKU)',
+  C5:  'Typed material metafields',
+  C6:  'Image alt text coverage',
+  Con1:'Schema price accuracy',
+  Con2:'Schema availability accuracy',
+  Con3:'SEO title consistency',
+  T1:  'Return policy timeframe',
+  T2:  'Shipping regions specified',
+  T4:  'AI checkout schema (OfferShippingDetails)',
+  A1:  'Inventory tracking enabled',
+  A2:  'Oversell risk eliminated',
+}
+
 function pillarScore(p: PillarScore): number {
   return Math.round(p.score * 100)
 }
@@ -75,25 +98,28 @@ export default function BeforeAfterReport({ data, copyPasteItems }: Props) {
   return (
     <div className="space-y-8">
       {/* Score delta hero */}
-      <div className="card p-6 text-center space-y-2">
-        <p className="text-xs font-code text-[#4B5A8A] uppercase tracking-widest">AI Readiness Score</p>
-        <div className="flex items-center justify-center gap-6">
-          <div>
-            <div className="text-4xl font-bold text-red-400">{beforeScore}</div>
-            <div className="text-xs text-[#4B5A8A] mt-1">Before</div>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <svg className="w-6 h-6 text-[#4B5A8A]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-            </svg>
-            <span className={`text-sm font-bold ${delta >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
-              {delta >= 0 ? '+' : ''}{delta} pts
-            </span>
-          </div>
-          <div>
-            <div className="text-4xl font-bold text-blue-400">{afterScore}</div>
-            <div className="text-xs text-[#4B5A8A] mt-1">After</div>
-          </div>
+      <div style={{
+        background: 'var(--paper)', color: 'var(--paper-ink)', borderRadius: 20, padding: '28px 32px',
+        display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 24,
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'rgba(26,24,18,0.5)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>Before</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 80, lineHeight: 0.9, color: beforeScore < 50 ? 'var(--m-bad-p)' : 'var(--m-warn-p)' }}>{beforeScore}</div>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, opacity: 0.4, marginTop: 6 }}>/100</div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(26,24,18,0.35)" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+          </svg>
+          <span style={{ fontFamily: 'var(--font-display)', fontSize: 22, color: delta >= 0 ? '#2d7a4f' : 'var(--m-bad-p)', fontWeight: 400 }}>
+            {delta >= 0 ? '+' : ''}{delta}
+          </span>
+          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, opacity: 0.4, letterSpacing: '0.08em' }}>pts</span>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'rgba(26,24,18,0.5)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>After</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 80, lineHeight: 0.9, color: afterScore >= 70 ? '#2d7a4f' : afterScore >= 50 ? 'var(--m-warn-p)' : 'var(--m-bad-p)' }}>{afterScore}</div>
+          <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, opacity: 0.4, marginTop: 6 }}>/100</div>
         </div>
       </div>
 
@@ -135,15 +161,15 @@ export default function BeforeAfterReport({ data, copyPasteItems }: Props) {
       {data.checks_improved.length > 0 && (
         <div>
           <p className="text-xs font-code text-[#4B5A8A] uppercase tracking-widest mb-3">
-            Checks Improved ({data.checks_improved.length})
+            Fixed ({data.checks_improved.length})
           </p>
           <div className="flex flex-wrap gap-2">
             {data.checks_improved.map(id => (
-              <span key={id} className="flex items-center gap-1.5 text-sm text-blue-400 bg-blue-500/10 border border-blue-500/30 rounded px-3 py-1.5 font-code">
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <span key={id} className="flex items-center gap-1.5 text-sm text-green-400 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-1.5">
+                <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                 </svg>
-                {id}
+                {CHECK_LABELS[id] ?? id}
               </span>
             ))}
           </div>
@@ -154,15 +180,15 @@ export default function BeforeAfterReport({ data, copyPasteItems }: Props) {
       {data.checks_unchanged.length > 0 && (
         <div>
           <p className="text-xs font-code text-[#4B5A8A] uppercase tracking-widest mb-3">
-            Still Failing ({data.checks_unchanged.length})
+            Still needs attention ({data.checks_unchanged.length})
           </p>
           <div className="flex flex-wrap gap-2">
             {data.checks_unchanged.map(id => (
-              <span key={id} className="flex items-center gap-1.5 text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-3 py-1.5 font-code">
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <span key={id} className="flex items-center gap-1.5 text-sm text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-1.5">
+                <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                 </svg>
-                {id}
+                {CHECK_LABELS[id] ?? id}
               </span>
             ))}
           </div>

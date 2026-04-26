@@ -12,17 +12,21 @@ from app.db.connection import close_pool, get_pool
 from app.db.queries import (
     create_job,
     get_job,
+    patch_report_section,
     update_job_error,
     update_job_fix_plan,
     update_job_report,
     update_job_status,
 )
 from app.schemas import (
+    AIVisibilityRequest,
     AnalyzeRequest,
     AnalyzeResponse,
     BeforeAfterResponse,
+    CopyRewriteRequest,
     ExecuteRequest,
     ExecuteResponse,
+    FAQRequest,
     FixPlanResponse,
     JobProgressResponse,
     JobStatusResponse,
@@ -31,6 +35,8 @@ from app.schemas import (
     RollbackResponse,
 )
 from app.utils.validators import validate_shopify_url
+from fastapi import Response
+from fastapi.responses import PlainTextResponse
 
 # Route implementations (to be added per day plan):
 #   POST /analyze                      — Day 2, schemas: AnalyzeRequest, AnalyzeResponse
@@ -109,7 +115,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
             step=row["progress_step"] or "",
             pct=row["progress_pct"] or 0,
         ),
-        report=row["report_json"] if row["status"] == "complete" else None,
+        report=row["report_json"] if row["status"] in {"complete", "awaiting_approval"} else None,
         error=row["error_message"],
     )
 
@@ -240,6 +246,246 @@ async def rollback_fix(job_id: str, fix_id: str, request: RollbackRequest) -> Ro
 # ---------------------------------------------------------------------------
 # GET /jobs/{job_id}/before-after
 # ---------------------------------------------------------------------------
+
+# ===========================================================================
+# AI Visibility extensions — April 2026
+# ===========================================================================
+
+async def _load_merchant_data_for_job(job_id: str, admin_token: str | None = None):
+    """Re-ingest merchant data for endpoints that need full Product objects.
+    Reads store_url from the job row; admin_token optional for richer data.
+    """
+    row = await get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    store_url = row["store_url"]
+    from app.services.ingestion import fetch_admin_data, fetch_public_data
+    if admin_token:
+        return await fetch_admin_data(store_url, admin_token)
+    return await fetch_public_data(store_url)
+
+
+def _stored_audit_section(report_json: dict | None, key: str) -> dict:
+    if not report_json:
+        raise HTTPException(status_code=400, detail="Job not yet complete")
+    section = report_json.get(key)
+    if section is None:
+        raise HTTPException(status_code=404, detail=f"{key} not present in this report")
+    return section
+
+
+# ---------------------------------------------------------------------------
+# GET /jobs/{job_id}/bot-access
+# ---------------------------------------------------------------------------
+
+@app.get("/jobs/{job_id}/bot-access")
+async def get_bot_access(job_id: str) -> dict:
+    row = await get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _stored_audit_section(row.get("report_json"), "bot_access")
+
+
+# ---------------------------------------------------------------------------
+# GET /jobs/{job_id}/identifiers
+# ---------------------------------------------------------------------------
+
+@app.get("/jobs/{job_id}/identifiers")
+async def get_identifiers(job_id: str) -> dict:
+    row = await get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _stored_audit_section(row.get("report_json"), "identifier_audit")
+
+
+# ---------------------------------------------------------------------------
+# GET /jobs/{job_id}/golden-record
+# ---------------------------------------------------------------------------
+
+@app.get("/jobs/{job_id}/golden-record")
+async def get_golden_record(job_id: str) -> dict:
+    row = await get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _stored_audit_section(row.get("report_json"), "golden_record")
+
+
+# ---------------------------------------------------------------------------
+# GET /jobs/{job_id}/trust-signals
+# ---------------------------------------------------------------------------
+
+@app.get("/jobs/{job_id}/trust-signals")
+async def get_trust_signals(job_id: str) -> dict:
+    row = await get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _stored_audit_section(row.get("report_json"), "trust_signals")
+
+
+# ---------------------------------------------------------------------------
+# GET /jobs/{job_id}/llms-txt and /llms-full-txt — text/plain, ready to host
+# ---------------------------------------------------------------------------
+
+@app.get("/jobs/{job_id}/llms-txt", response_class=PlainTextResponse)
+async def get_llms_txt(job_id: str, admin_token: str | None = None) -> PlainTextResponse:
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=admin_token)
+    from app.services.llms_txt import generate_llms_txt
+    return PlainTextResponse(generate_llms_txt(merchant_data), media_type="text/plain; charset=utf-8")
+
+
+@app.get("/jobs/{job_id}/llms-full-txt", response_class=PlainTextResponse)
+async def get_llms_full_txt(job_id: str, admin_token: str | None = None) -> PlainTextResponse:
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=admin_token)
+    from app.services.llms_txt import generate_llms_full_txt
+    return PlainTextResponse(generate_llms_full_txt(merchant_data), media_type="text/plain; charset=utf-8")
+
+
+# ---------------------------------------------------------------------------
+# GET /jobs/{job_id}/schema-package — JSON-LD blocks per product
+# ---------------------------------------------------------------------------
+
+@app.get("/jobs/{job_id}/schema-package")
+async def get_schema_package(job_id: str, admin_token: str | None = None) -> dict:
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=admin_token)
+    from app.services.schema_enricher import generate_schema_package
+    return generate_schema_package(merchant_data)
+
+
+# ---------------------------------------------------------------------------
+# GET /jobs/{job_id}/feeds/chatgpt — JSONL
+# ---------------------------------------------------------------------------
+# Pass ?admin_token=… to ingest with the same auth used at /analyze; otherwise
+# the feed only sees public storefront data and can show fewer identifiers
+# than the stored audit.
+
+@app.get("/jobs/{job_id}/feeds/chatgpt")
+async def get_chatgpt_feed(job_id: str, admin_token: str | None = None) -> Response:
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=admin_token)
+    from app.services.feed_generator import build_chatgpt_feed
+    feed = build_chatgpt_feed(merchant_data)
+    return Response(
+        content=feed["jsonl"],
+        media_type="application/x-ndjson",
+        headers={
+            "X-Feed-Total-Lines": str(feed["summary"]["total_lines"]),
+            "X-Feed-Currency": feed["summary"]["currency"],
+            "X-Ingestion-Mode": merchant_data.ingestion_mode,
+            "Content-Disposition": f'attachment; filename="chatgpt-feed-{job_id[:8]}.jsonl"',
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /jobs/{job_id}/feeds/perplexity — XML
+# ---------------------------------------------------------------------------
+
+@app.get("/jobs/{job_id}/feeds/perplexity")
+async def get_perplexity_feed(job_id: str, admin_token: str | None = None) -> Response:
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=admin_token)
+    from app.services.feed_generator import build_perplexity_feed
+    feed = build_perplexity_feed(merchant_data)
+    return Response(
+        content=feed["xml"],
+        media_type="application/xml",
+        headers={
+            "X-Feed-Total-Items": str(feed["summary"]["total_items"]),
+            "X-Skipped-No-Identifier": str(feed["summary"]["skipped_without_identifier"]),
+            "X-Ingestion-Mode": merchant_data.ingestion_mode,
+            "Content-Disposition": f'attachment; filename="perplexity-feed-{job_id[:8]}.xml"',
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /jobs/{job_id}/feeds/google — XML (Merchant Center / AI Mode)
+# ---------------------------------------------------------------------------
+
+@app.get("/jobs/{job_id}/feeds/google")
+async def get_google_feed(job_id: str, admin_token: str | None = None) -> Response:
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=admin_token)
+    from app.services.feed_generator import build_google_feed
+    feed = build_google_feed(merchant_data)
+    return Response(
+        content=feed["xml"],
+        media_type="application/xml",
+        headers={
+            "X-Feed-Total-Items": str(feed["summary"]["total_items"]),
+            "X-Ingestion-Mode": merchant_data.ingestion_mode,
+            "Content-Disposition": f'attachment; filename="google-feed-{job_id[:8]}.xml"',
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /jobs/{job_id}/robots-suggestion — text/plain robots.txt patch
+# ---------------------------------------------------------------------------
+
+@app.get("/jobs/{job_id}/robots-suggestion", response_class=PlainTextResponse)
+async def get_robots_suggestion(job_id: str) -> PlainTextResponse:
+    row = await get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    audit = _stored_audit_section(row.get("report_json"), "bot_access")
+    from app.services.bot_audit import suggested_robots_txt_additions
+    return PlainTextResponse(
+        suggested_robots_txt_additions(audit),
+        media_type="text/plain; charset=utf-8",
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /jobs/{job_id}/ai-visibility — FLAGSHIP live multi-LLM probe
+# ---------------------------------------------------------------------------
+
+@app.post("/jobs/{job_id}/ai-visibility")
+async def post_ai_visibility(job_id: str, request: AIVisibilityRequest) -> dict:
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=request.admin_token)
+    from app.services.ai_visibility import probe_ai_visibility
+    result = await probe_ai_visibility(
+        merchant_data=merchant_data,
+        prompts=request.prompts,
+        providers=request.providers,
+    )
+    # Persist into the report so the dashboard can read ai_visibility from
+    # the same /jobs/{id} response that surfaces the rest of the audit.
+    try:
+        await patch_report_section(job_id, "ai_visibility", result)
+    except Exception as exc:
+        logger.warning("ai-visibility patch failed for %s: %s", job_id, exc)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# POST /jobs/{job_id}/copy-rewrite — per-channel copy rewriter
+# ---------------------------------------------------------------------------
+
+@app.post("/jobs/{job_id}/copy-rewrite")
+async def post_copy_rewrite(job_id: str, request: CopyRewriteRequest) -> dict:
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=request.admin_token)
+    from app.services.copy_rewriter import rewrite_top_products
+    products = merchant_data.products
+    if request.product_ids:
+        wanted = set(request.product_ids)
+        products = [p for p in products if p.id in wanted]
+    rewrites = await rewrite_top_products(products, limit=request.limit, channels=request.channels)
+    return {"count": len(rewrites), "rewrites": rewrites}
+
+
+# ---------------------------------------------------------------------------
+# POST /jobs/{job_id}/faq-schema — FAQPage JSON-LD generator
+# ---------------------------------------------------------------------------
+
+@app.post("/jobs/{job_id}/faq-schema")
+async def post_faq_schema(job_id: str, request: FAQRequest) -> dict:
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=request.admin_token)
+    from app.services.faq_generator import generate_faq_for_top_products
+    products = merchant_data.products
+    if request.product_ids:
+        wanted = set(request.product_ids)
+        products = [p for p in products if p.id in wanted]
+    faqs = await generate_faq_for_top_products(products, limit=request.limit)
+    return {"count": len(faqs), "faqs": faqs}
+
 
 @app.get("/jobs/{job_id}/before-after")
 async def get_before_after(job_id: str) -> BeforeAfterResponse:
@@ -397,6 +643,30 @@ async def run_analysis_pipeline(job_id: str, request: AnalyzeRequest) -> None:
             ),
         )
 
+        # Step 3.5: AI-visibility extensions (April 2026 channel readiness)
+        await update_job_status(job_id, "simulating", "Auditing AI bot access + identifiers", 85)
+        from app.services.bot_audit import audit_bot_access
+        from app.services.identifier_audit import audit_identifiers
+        from app.services.golden_record import score_store
+        from app.services.trust_signals import score_trust_signals
+        from app.services.feed_generator import (
+            build_chatgpt_feed,
+            build_perplexity_feed,
+            build_google_feed,
+        )
+        from app.services.llms_txt import generate_llms_txt
+
+        bot_access = audit_bot_access(merchant_data.robots_txt)
+        identifier_audit = audit_identifiers(merchant_data)
+        golden_record = score_store(merchant_data)
+        trust_signals = score_trust_signals(merchant_data)
+        feed_summaries = {
+            "chatgpt":    build_chatgpt_feed(merchant_data)["summary"],
+            "perplexity": build_perplexity_feed(merchant_data)["summary"],
+            "google":     build_google_feed(merchant_data)["summary"],
+        }
+        llms_txt_preview = generate_llms_txt(merchant_data)[:1500]
+
         # Step 4: assemble report
         await update_job_status(job_id, "simulating", "Assembling report", 90)
         from app.services.report_builder import assemble_report
@@ -410,13 +680,19 @@ async def run_analysis_pipeline(job_id: str, request: AnalyzeRequest) -> None:
             query_match_results=query_match_results,
             competitor_results=competitor_results,
             copy_paste_items=[],
+            bot_access=bot_access,
+            identifier_audit=identifier_audit,
+            golden_record=golden_record,
+            trust_signals=trust_signals,
+            feed_summaries=feed_summaries,
+            llms_txt_preview=llms_txt_preview,
         )
 
         # Step 5: generate fix plan (paid tier only) and save
         if request.admin_token:
             await update_job_status(job_id, "simulating", "Planning fixes", 95)
             from app.agent.nodes import generate_fix_plan
-            fix_items = generate_fix_plan(findings)
+            fix_items = generate_fix_plan(findings, merchant_data=merchant_data)
             fix_plan_dict = {"fixes": [dataclasses.asdict(f) for f in fix_items]}
             await update_job_fix_plan(job_id, fix_plan_dict)
 

@@ -1,0 +1,22 @@
+// Shared human-readable labels for check IDs used across components
+export const CHECK_LABELS: Record<string, string> = {
+  D1a: "AI bot crawl access",
+  D1b: "Shopify Catalog eligibility",
+  D2:  "Sitemap with product URLs",
+  D3:  "llms.txt AI guidance file",
+  D5:  "Translated product content",
+  C1:  "Product taxonomy mapped",
+  C2:  "Category noun in title",
+  C3:  "Variant options named",
+  C4:  "Product identifier (GTIN/SKU)",
+  C5:  "Typed material metafields",
+  C6:  "Image alt text coverage",
+  Con1:"Schema price accuracy",
+  Con2:"Schema availability accuracy",
+  Con3:"SEO title consistency",
+  T1:  "Return policy timeframe",
+  T2:  "Shipping regions specified",
+  T4:  "AI checkout schema",
+  A1:  "Inventory tracking enabled",
+  A2:  "Oversell risk eliminated",
+}

@@ -7,3 +7,11 @@ shopmirror/frontend/.env
 __pycache__/
 **/__pycache__/
 **/*.pyc
+command.txt
+
+# Local tooling — not part of the app
+node_modules/
+package.json
+package-lock.json
+design-system/
+.claude/skills/

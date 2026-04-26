@@ -1,105 +1,73 @@
 import type { CompetitorResult } from '../api/client'
+import { CHECK_LABELS } from '../utils/labels'
 
 interface Props {
   results: CompetitorResult[]
 }
 
 export default function CompetitorPanel({ results }: Props) {
-  const totalGaps = results.reduce((acc, r) => acc + r.gaps.length, 0)
+  if (results.length === 0) return null
 
   return (
-    <div className="bg-[#141830] border border-[#1E2545] rounded-2xl p-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontFamily: 'var(--font-geist)' }}>
+      {results.map((result, i) => {
+        const gaps = result.gaps ?? []
+        const hasGaps = gaps.length > 0
 
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2">
-          <line x1="18" y1="20" x2="18" y2="10"/>
-          <line x1="12" y1="20" x2="12" y2="4"/>
-          <line x1="6" y1="20" x2="6" y2="14"/>
-          <line x1="2" y1="20" x2="22" y2="20"/>
-        </svg>
-        <span className="font-code text-lg font-semibold text-white">Competitor Analysis</span>
-        {totalGaps > 0 && (
-          <span className="ml-auto bg-red-500/15 text-red-400 border border-red-500/30 text-xs font-code px-2.5 py-1 rounded-full">
-            {totalGaps} gaps found
-          </span>
-        )}
-      </div>
-
-      {/* Competitor cards */}
-      <div className="space-y-4">
-        {results.map((result, i) => (
-          <div
-            key={i}
-            className="bg-[#0F1535] border border-[#1E2545] rounded-xl p-5 hover:border-blue-500/20 transition-all duration-200 cursor-pointer"
-          >
-            {/* Card header */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
-                <span className="font-code text-sm font-semibold text-white">
+        return (
+          <div key={i} style={{
+            background: 'var(--ink-2)', border: '1px solid var(--ink-line)',
+            borderRadius: 16, padding: '20px 24px',
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: hasGaps ? 16 : 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--m-info)', display: 'inline-block', flexShrink: 0 }} />
+                <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--m-fg)' }}>
                   {result.competitor.store_domain}
                 </span>
               </div>
-              {result.gaps.length > 0 ? (
-                <span className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-code px-2.5 py-1 rounded-full">
-                  {result.gaps.length} checks they pass, you fail
+              {hasGaps ? (
+                <span style={{
+                  fontFamily: 'var(--font-geist-mono)', fontSize: 10, padding: '3px 10px',
+                  borderRadius: 100, background: 'rgba(213,122,120,0.08)',
+                  color: 'var(--m-bad)', border: '1px solid rgba(213,122,120,0.2)',
+                }}>
+                  They are ahead on {gaps.length} thing{gaps.length !== 1 ? 's' : ''}
                 </span>
               ) : (
-                <span className="bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-code px-2.5 py-1 rounded-full">
-                  No gaps found
+                <span style={{
+                  fontFamily: 'var(--font-geist-mono)', fontSize: 10, padding: '3px 10px',
+                  borderRadius: 100, background: 'rgba(143,184,154,0.08)',
+                  color: 'var(--m-good)', border: '1px solid rgba(143,184,154,0.2)',
+                }}>
+                  You are ahead
                 </span>
               )}
             </div>
 
-            {/* Gap badges */}
-            {result.gaps.length > 0 && (
-              <div className="mb-4">
-                <p className="font-code text-xs text-slate-500 uppercase tracking-wider mb-2">
-                  Your gaps vs this competitor
+            {/* Gap list — readable names only */}
+            {hasGaps && (
+              <div>
+                <p style={{ margin: '0 0 10px', fontSize: 11, color: 'var(--m-fg-3)', fontFamily: 'var(--font-geist-mono)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                  Where they have an edge
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {result.gaps.map(gap => (
-                    <span
-                      key={gap}
-                      className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-code px-2.5 py-1.5 rounded-lg"
-                    >
-                      &#x2717; {gap}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {gaps.map((gap: string) => (
+                    <span key={gap} style={{
+                      fontSize: 12, padding: '4px 10px', borderRadius: 8,
+                      background: 'rgba(213,122,120,0.06)', color: 'var(--m-fg-2)',
+                      border: '1px solid rgba(213,122,120,0.15)',
+                    }}>
+                      {CHECK_LABELS[gap] ?? gap}
                     </span>
                   ))}
                 </div>
               </div>
             )}
-
-            {/* Check results */}
-            <div>
-              <p className="font-code text-xs text-slate-500 uppercase tracking-wider mb-2">
-                Their check results
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(result.competitor.check_results).map(([checkId, passed]) =>
-                  passed ? (
-                    <span
-                      key={checkId}
-                      className="bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-code px-2 py-1 rounded"
-                    >
-                      &#x2713; {checkId}
-                    </span>
-                  ) : (
-                    <span
-                      key={checkId}
-                      className="bg-[#1E2545] text-slate-500 text-xs font-code px-2 py-1 rounded"
-                    >
-                      &#x2717; {checkId}
-                    </span>
-                  )
-                )}
-              </div>
-            </div>
           </div>
-        ))}
-      </div>
-
+        )
+      })}
     </div>
   )
 }

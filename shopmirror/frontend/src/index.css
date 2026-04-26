@@ -2,6 +2,99 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── ShopMirror — The Reflection design system ──────────────────────────── */
+:root {
+  --ink:          #0e0d12;
+  --ink-2:        #16141d;
+  --ink-3:        #1f1c28;
+  --ink-line:     #2a2633;
+  --ink-line-2:   #3a3447;
+  --paper:        #f4f0e8;
+  --paper-2:      #ece7da;
+  --paper-3:      #d9d2bf;
+  --paper-ink:    #1a1812;
+  --paper-line:   #c9c1a8;
+  --m-fg:         #ece8f5;
+  --m-fg-2:       #b9b3c8;
+  --m-fg-3:       #7e788f;
+  --m-fg-4:       #4a4558;
+  --m-violet:     #b4a0d6;
+  --m-violet-2:   #8a73b8;
+  --m-violet-soft:#3a2f55;
+  --m-good:   #8fb89a;
+  --m-warn:   #d4a96b;
+  --m-bad:    #d57a78;
+  --m-info:   #93b0d4;
+  --m-good-p: #4a7a59;
+  --m-warn-p: #a87231;
+  --m-bad-p:  #b1453f;
+  --m-info-p: #4d6f9f;
+  --font-display:    "Instrument Serif", "Lora", Georgia, serif;
+  --font-geist:      "Geist", "Inter", system-ui, sans-serif;
+  --font-geist-mono: "Geist Mono", "Fira Code", ui-monospace, monospace;
+}
+
+@layer utilities {
+  .font-display { font-family: var(--font-display); }
+  .font-geist   { font-family: var(--font-geist); }
+  .font-gmono   { font-family: var(--font-geist-mono); }
+
+  .ink-bg   { background: var(--ink-2); }
+  .paper-bg { background: var(--paper); color: var(--paper-ink); }
+
+  .seam-line {
+    position: absolute; top: 0; bottom: 0; left: 50%; width: 1px;
+    background: linear-gradient(to bottom,
+      transparent 0%,
+      rgba(180,160,214,0.0) 5%,
+      rgba(180,160,214,0.4) 50%,
+      rgba(180,160,214,0.0) 95%,
+      transparent 100%
+    );
+    pointer-events: none; z-index: 5;
+  }
+  .scanline-anim {
+    position: absolute; left: 0; right: 0; height: 2px;
+    background: linear-gradient(to right, transparent, var(--m-violet), transparent);
+    opacity: 0.7; filter: blur(0.5px);
+    animation: scanMove 3.6s ease-in-out infinite;
+  }
+  @keyframes scanMove {
+    0%   { top: 0%;   opacity: 0; }
+    10%  { opacity: 0.9; }
+    90%  { opacity: 0.9; }
+    100% { top: 100%; opacity: 0; }
+  }
+  .write-in {
+    animation: writeIn 900ms ease both;
+  }
+  @keyframes writeIn {
+    from { opacity: 0; filter: blur(8px); transform: translateY(8px); }
+    to   { opacity: 1; filter: blur(0);    transform: translateY(0); }
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .eyebrow {
+    font-family: var(--font-geist-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--m-fg-3);
+    font-weight: 500;
+  }
+  .eyebrow-paper {
+    font-family: var(--font-geist-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(26,24,18,0.55);
+    font-weight: 500;
+  }
+}
+
 /* ── ShopMirror Theme ───────────────────────────────────────────────────── */
 :root {
   --card: #ffffff;

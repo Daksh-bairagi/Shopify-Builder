@@ -13,12 +13,15 @@ class FixItem:
                 # 'create_metafield_definitions' | 'generate_schema_snippet' | 'suggest_policy_fix'
     product_id: str
     product_title: str
-    field: str                      # which field is being changed
+    field: str                      # which field is being changed (check_id, e.g. 'C1')
     current_value: Optional[str]
     proposed_value: str
     reason: str
     risk: str                       # 'LOW'
     reversible: bool
+    severity: str = "MEDIUM"        # 'CRITICAL' | 'HIGH' | 'MEDIUM' — from the source finding
+    fix_type: str = "auto"          # 'auto' | 'copy_paste' | 'manual' | 'developer'
+    check_id: str = ""              # mirrors field for frontend compatibility
 
 
 @dataclass

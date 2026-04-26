@@ -2,107 +2,123 @@ import type { MCPResult } from '../api/client'
 
 interface Props {
   results: MCPResult[]
+  isSimulation?: boolean   // true when real MCP was unavailable, Gemini was used
 }
 
 type Classification = MCPResult['classification']
 
-const BORDER_CLASS: Record<Classification, string> = {
-  ANSWERED: 'border-green-500/20',
-  UNANSWERED: 'border-red-500/20',
-  WRONG: 'border-orange-500/20',
-}
-
-const BADGE_CLASS: Record<Classification, string> = {
-  ANSWERED: 'bg-green-500/15 text-green-400 border border-green-500/30',
-  UNANSWERED: 'bg-red-500/15 text-red-400 border border-red-500/30',
-  WRONG: 'bg-orange-500/15 text-orange-400 border border-orange-500/30',
+// Inline-style equivalents matching Dashboard design language
+const RESULT_STYLES: Record<Classification, { border: string; bg: string; badgeBg: string; badgeColor: string }> = {
+  ANSWERED: {
+    border: 'rgba(143,184,154,0.2)',
+    bg:     'rgba(143,184,154,0.04)',
+    badgeBg:'rgba(143,184,154,0.12)',
+    badgeColor: 'var(--m-good)',
+  },
+  UNANSWERED: {
+    border: 'rgba(213,122,120,0.2)',
+    bg:     'rgba(213,122,120,0.04)',
+    badgeBg:'rgba(213,122,120,0.12)',
+    badgeColor: 'var(--m-bad)',
+  },
+  WRONG: {
+    border: 'rgba(212,169,107,0.25)',
+    bg:     'rgba(212,169,107,0.04)',
+    badgeBg:'rgba(212,169,107,0.12)',
+    badgeColor: 'var(--m-warn)',
+  },
 }
 
 const BADGE_LABEL: Record<Classification, string> = {
-  ANSWERED: '✓ ANSWERED',
-  UNANSWERED: '✗ NO ANSWER',
-  WRONG: '⚠ WRONG',
+  ANSWERED:   '✓ Answered',
+  UNANSWERED: '✗ No data',
+  WRONG:      '⚠ Wrong',
 }
 
-export default function MCPSimulation({ results }: Props) {
-  const answered = results.filter(r => r.classification === 'ANSWERED').length
+export default function MCPSimulation({ results, isSimulation }: Props) {
+  const answered   = results.filter(r => r.classification === 'ANSWERED').length
   const unanswered = results.filter(r => r.classification === 'UNANSWERED').length
-  const wrong = results.filter(r => r.classification === 'WRONG').length
+  const wrong      = results.filter(r => r.classification === 'WRONG').length
 
   return (
-    <div className="bg-[#141830] border border-[#1E2545] rounded-2xl p-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
-      {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-center gap-3 mb-1">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2">
-            <polyline points="4 17 10 11 4 5"/>
-            <line x1="12" y1="19" x2="20" y2="19"/>
-          </svg>
-          <span className="font-code text-lg font-semibold text-white">MCP Shopping AI Simulation</span>
-        </div>
-        <p className="text-xs text-slate-500">
-          Simulating how an AI assistant responds using only your store's structured data
-        </p>
+      {/* Mode label */}
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: 8,
+        padding: '6px 12px', borderRadius: 100, alignSelf: 'flex-start',
+        border: '1px solid var(--ink-line)', fontFamily: 'var(--font-geist-mono)',
+        fontSize: 11, color: 'var(--m-fg-3)', letterSpacing: '0.04em',
+      }}>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: isSimulation ? 'var(--m-warn)' : 'var(--m-good)', display: 'inline-block' }} />
+        {isSimulation
+          ? 'Simulated AI agent responses (based on your store\'s machine-readable data)'
+          : 'Live Shopify MCP endpoint — real AI agent responses'}
       </div>
 
-      {/* Summary row */}
-      <div className="flex gap-3 mb-5">
-        <div className="bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-2 text-center">
-          <div className="font-code text-xl font-bold text-green-400">{answered}</div>
-          <div className="text-xs text-slate-400">Answered</div>
-        </div>
-        <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 text-center">
-          <div className="font-code text-xl font-bold text-red-400">{unanswered}</div>
-          <div className="text-xs text-slate-400">Cannot Answer</div>
-        </div>
-        <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg px-3 py-2 text-center">
-          <div className="font-code text-xl font-bold text-orange-400">{wrong}</div>
-          <div className="text-xs text-slate-400">Wrong</div>
-        </div>
+      {/* Summary counters */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+        {[
+          { n: answered,   l: 'Answered',    c: 'var(--m-good)', bg: 'rgba(143,184,154,0.08)', border: 'rgba(143,184,154,0.2)' },
+          { n: unanswered, l: 'No data',     c: 'var(--m-bad)',  bg: 'rgba(213,122,120,0.08)', border: 'rgba(213,122,120,0.2)' },
+          { n: wrong,      l: 'Wrong data',  c: 'var(--m-warn)', bg: 'rgba(212,169,107,0.08)', border: 'rgba(212,169,107,0.2)' },
+        ].map(s => (
+          <div key={s.l} style={{
+            padding: '14px 16px', borderRadius: 14, textAlign: 'center',
+            background: s.bg, border: `1px solid ${s.border}`,
+          }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 36, lineHeight: 1, color: s.c }}>{s.n}</div>
+            <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--m-fg-3)', marginTop: 6, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{s.l}</div>
+          </div>
+        ))}
       </div>
 
       {/* Result cards */}
-      <div className="space-y-3">
-        {results.map((result, i) => (
-          <div
-            key={i}
-            className={`bg-[#0F1535] border rounded-xl p-4 ${BORDER_CLASS[result.classification]}`}
-          >
-            {/* Question + badge */}
-            <div className="flex items-start gap-3 mb-2">
-              <span className={`shrink-0 font-code text-xs px-2.5 py-1 rounded-md font-semibold ${BADGE_CLASS[result.classification]}`}>
-                {BADGE_LABEL[result.classification]}
-              </span>
-              <p className="text-sm font-medium text-white flex-1">{result.question}</p>
-            </div>
-
-            {/* AI response */}
-            <p className="text-sm text-slate-400 italic leading-relaxed">{result.response}</p>
-
-            {/* Ground truth mismatch */}
-            {result.ground_truth_mismatch && (
-              <div className="mt-2 bg-orange-500/10 rounded-lg px-3 py-2">
-                <span className="text-xs text-orange-300">{result.ground_truth_mismatch}</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {results.map((result, i) => {
+          const s = RESULT_STYLES[result.classification]
+          return (
+            <div key={i} style={{
+              background: s.bg, border: `1px solid ${s.border}`,
+              borderRadius: 14, padding: '16px 18px',
+            }}>
+              {/* Question row + badge */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
+                <span style={{
+                  flexShrink: 0, fontFamily: 'var(--font-geist-mono)', fontSize: 10,
+                  padding: '3px 8px', borderRadius: 6, fontWeight: 600,
+                  background: s.badgeBg, color: s.badgeColor,
+                  letterSpacing: '0.06em', whiteSpace: 'nowrap', marginTop: 1,
+                }}>
+                  {BADGE_LABEL[result.classification]}
+                </span>
+                <p style={{ margin: 0, fontSize: 14, fontWeight: 500, color: 'var(--m-fg)', flex: 1, lineHeight: 1.4 }}>
+                  {result.question}
+                </p>
               </div>
-            )}
 
-            {/* Related finding IDs */}
-            {result.related_finding_ids.length > 0 && (
-              <div className="mt-2 flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-slate-500 font-code">Linked findings:</span>
-                {result.related_finding_ids.map(id => (
-                  <span
-                    key={id}
-                    className="font-code text-xs bg-[#141830] border border-[#1E2545] text-slate-400 px-2 py-0.5 rounded"
-                  >
-                    {id}
+              {/* AI response */}
+              <p style={{
+                margin: 0, fontSize: 13, color: 'var(--m-fg-2)', lineHeight: 1.55,
+                fontStyle: result.classification === 'UNANSWERED' ? 'italic' : 'normal',
+              }}>
+                {result.response}
+              </p>
+
+              {/* Ground truth mismatch */}
+              {result.ground_truth_mismatch && (
+                <div style={{
+                  marginTop: 10, padding: '8px 12px', borderRadius: 8,
+                  background: 'rgba(212,169,107,0.08)', border: '1px solid rgba(212,169,107,0.2)',
+                }}>
+                  <span style={{ fontSize: 12, color: 'var(--m-warn)' }}>
+                    ↳ {result.ground_truth_mismatch}
                   </span>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
 
     </div>

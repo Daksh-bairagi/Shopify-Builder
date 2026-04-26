@@ -127,3 +127,12 @@ class AuditReport:
     query_match_results: list[QueryMatchResult]
     competitor_comparison: list[CompetitorResult]
     copy_paste_package: list[CopyPasteItem]
+
+    # ---------- AI Visibility extensions (April 2026) ----------
+    bot_access: Optional[dict] = None         # AI crawler access audit
+    identifier_audit: Optional[dict] = None   # GTIN/MPN/Brand coverage
+    golden_record: Optional[dict] = None      # Per-product completeness scores
+    trust_signals: Optional[dict] = None      # Entity / Evidence / Technical scorecard
+    ai_visibility: Optional[dict] = None      # Multi-LLM probe results (populated on demand)
+    feed_summaries: Optional[dict] = None     # Per-channel feed line counts
+    llms_txt_preview: Optional[str] = None    # First N chars of generated llms.txt

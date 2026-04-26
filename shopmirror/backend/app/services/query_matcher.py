@@ -45,9 +45,14 @@ async def parse_query_attributes(query_text: str) -> ParsedQuery:
         ParsedQuery with category, price bounds, and attribute list.
     """
     # Import here to avoid circular imports at module level
-    from langchain_google_vertexai import ChatVertexAI
+    import os
+    from langchain_google_genai import ChatGoogleGenerativeAI
 
-    llm = ChatVertexAI(model="gemini-2.0-flash", temperature=0)
+    llm = ChatGoogleGenerativeAI(
+        model=os.environ.get("VERTEX_MODEL", "gemini-2.5-flash"),
+        temperature=0,
+        google_api_key=os.environ.get("GEMINI_API_KEY"),
+    )
     structured = llm.with_structured_output(ParsedQuery)
 
     prompt = (

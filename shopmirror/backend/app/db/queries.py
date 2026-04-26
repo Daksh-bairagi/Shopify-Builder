@@ -10,6 +10,10 @@ def _parse_jsonb(value: Any) -> Any:
     return value
 
 
+def _to_json(value: Any) -> str:
+    return json.dumps(value, default=str)
+
+
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
@@ -71,7 +75,7 @@ async def update_job_report(
         WHERE id = $1::uuid
         """,
         job_id,
-        json.dumps(report_json),
+        _to_json(report_json),
         status,
     )
 
@@ -92,6 +96,27 @@ async def update_job_error(job_id: str, error_message: str) -> None:
     )
 
 
+async def patch_report_section(job_id: str, section_key: str, section_value: dict) -> bool:
+    """Merge a section into report_json without rewriting the rest. Used by
+    on-demand audit endpoints (e.g. ai-visibility) so their results land in the
+    same report record the dashboard reads from. Returns True on success."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT report_json FROM analysis_jobs WHERE id = $1::uuid",
+        job_id,
+    )
+    if row is None:
+        return False
+    existing = _parse_jsonb(row["report_json"]) or {}
+    existing[section_key] = section_value
+    await pool.execute(
+        "UPDATE analysis_jobs SET report_json = $2::jsonb WHERE id = $1::uuid",
+        job_id,
+        _to_json(existing),
+    )
+    return True
+
+
 async def update_job_fix_plan(job_id: str, fix_plan_json: dict) -> None:
     pool = await get_pool()
     await pool.execute(
@@ -101,7 +126,7 @@ async def update_job_fix_plan(job_id: str, fix_plan_json: dict) -> None:
         WHERE id = $1::uuid
         """,
         job_id,
-        json.dumps(fix_plan_json),
+        _to_json(fix_plan_json),
     )
 
 

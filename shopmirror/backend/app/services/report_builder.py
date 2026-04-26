@@ -172,6 +172,12 @@ async def assemble_report(
     competitor_results: list[CompetitorResult],
     copy_paste_items: list[CopyPasteItem],
     product_perceptions: list | None = None,
+    bot_access: dict | None = None,
+    identifier_audit: dict | None = None,
+    golden_record: dict | None = None,
+    trust_signals: dict | None = None,
+    feed_summaries: dict | None = None,
+    llms_txt_preview: str | None = None,
 ) -> AuditReport:
     """
     Assembles all pipeline outputs into a single AuditReport.
@@ -201,6 +207,12 @@ async def assemble_report(
             query_match_results=query_match_results,
             competitor_comparison=competitor_results,
             copy_paste_package=copy_paste_items,
+            bot_access=bot_access,
+            identifier_audit=identifier_audit,
+            golden_record=golden_record,
+            trust_signals=trust_signals,
+            feed_summaries=feed_summaries,
+            llms_txt_preview=llms_txt_preview,
         )
     except Exception:
         # Fallback: return a minimal valid report so the job doesn't crash

@@ -4,147 +4,163 @@ interface Props {
   status: JobStatusResponse
 }
 
-const PIPELINE_STEPS = [
-  { label: 'Ingesting', icon: (
-    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-    </svg>
-  )},
-  { label: 'Auditing', icon: (
-    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  )},
-  { label: 'Simulating', icon: (
-    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
-    </svg>
-  )},
-  { label: 'Applying', icon: (
-    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 004.486-6.336l-3.276 3.277a3.004 3.004 0 01-2.25-2.25l3.276-3.276a4.5 4.5 0 00-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437l1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008z" />
-    </svg>
-  )},
-  { label: 'Complete', icon: (
-    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-    </svg>
-  )},
+const STEPS = [
+  { l: 'Connecting to storefront',   d: 'Pulling sitemap, robots.txt, theme metadata' },
+  { l: 'Ingesting product catalog',  d: 'Products, variants, pricing, inventory' },
+  { l: 'Running 19 structural checks', d: 'GTIN, taxonomy, metafields, schema.org' },
+  { l: 'Probing AI shopping agents', d: 'Gemini · Perplexity · Shopify MCP' },
+  { l: 'Computing perception gap',   d: 'Intended positioning vs. AI-extracted view' },
+  { l: 'Drafting fix plan',          d: 'Sorting by impact · auto vs. copy-paste vs. manual' },
 ]
 
-function getActiveStepIndex(status: JobStatusResponse['status']): number {
-  switch (status) {
+function statusToStep(s: JobStatusResponse['status']): number {
+  switch (s) {
     case 'pending':
-    case 'ingesting':
-      return 0
-    case 'auditing':
-      return 1
-    case 'simulating':
-      return 2
-    case 'complete':
+    case 'ingesting':   return 0
+    case 'auditing':    return 2
+    case 'simulating':  return 3
     case 'awaiting_approval':
-      return 4
-    default:
-      return 0
+    case 'complete':    return 5
+    default:            return 0
   }
 }
 
+function Logo() {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+      <svg width={28} height={28} viewBox="0 0 32 32" fill="none">
+        <circle cx="16" cy="16" r="14" stroke="var(--m-fg)" strokeOpacity="0.25" strokeWidth="1" />
+        <path d="M9 11 Q16 8 23 11 M9 21 Q16 24 23 21" stroke="var(--m-fg)" strokeWidth="1.4" strokeLinecap="round" fill="none" />
+        <line x1="16" y1="3" x2="16" y2="29" stroke="var(--m-violet)" strokeWidth="1" strokeDasharray="2 2" />
+      </svg>
+      <span style={{ fontFamily: 'var(--font-display)', fontSize: 19, letterSpacing: '-0.02em', color: 'var(--m-fg)' }}>
+        Shop<em style={{ fontStyle: 'italic', color: 'var(--m-violet)' }}>Mirror</em>
+      </span>
+    </span>
+  )
+}
+
 export default function ProgressScreen({ status }: Props) {
-  const activeStep = getActiveStepIndex(status.status)
+  const activeStep = statusToStep(status.status)
   const pct = status.progress.pct
 
   return (
-    <div className="min-h-screen bg-[#0A0E27] flex items-center justify-center px-4">
-      <div className="w-full max-w-lg animate-fade-in">
-        {/* Logo + Spinner */}
-        <div className="flex flex-col items-center gap-5">
-          <span className="font-code text-sm font-bold text-[#6B7DB3] tracking-[0.3em] uppercase">
-            ShopMirror
-          </span>
+    <div style={{
+      minHeight: '100vh',
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      position: 'relative',
+      background: 'var(--ink)',
+      fontFamily: 'var(--font-geist)',
+    }}>
+      {/* Animated seam */}
+      <div className="seam-line">
+        <div className="scanline-anim" />
+      </div>
 
-          {/* Glow spinner */}
-          <div className="relative w-14 h-14">
-            <div className="absolute inset-0 rounded-full bg-blue-500/20 blur-xl animate-pulse" />
-            <div className="relative w-14 h-14 rounded-full border-4 border-[#1E2545] border-t-blue-500 animate-spin" />
-          </div>
-        </div>
+      {/* LEFT — step list */}
+      <div style={{ padding: '64px 72px', display: 'flex', flexDirection: 'column', gap: 48, color: 'var(--m-fg)' }}>
+        <Logo />
 
-        {/* Status text */}
-        <div className="mt-8 text-center">
-          <p className="text-xl font-semibold text-white font-sans">
-            {status.progress.step || 'Starting analysis...'}
-          </p>
-          <p className="text-[#6B7DB3] mt-1.5 text-sm">
-            Analyzing your store's AI commerce readiness
-          </p>
-        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <div className="eyebrow">Auditing</div>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(36px,4vw,60px)', lineHeight: 1.0, letterSpacing: '-0.02em', fontWeight: 400, margin: '16px 0 56px', color: 'var(--m-fg)' }}>
+            Holding the<br />
+            <em style={{ fontStyle: 'italic', color: 'var(--m-violet)' }}>mirror</em> up to<br />
+            your store…
+          </h1>
 
-        {/* Progress bar */}
-        <div className="mt-7">
-          <div className="bg-[#141830] border border-[#1E2545] rounded-full h-2 w-full overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-500 ease-out"
-              style={{
-                width: `${pct}%`,
-                background: 'linear-gradient(90deg, #3B82F6, #60A5FA)',
-                boxShadow: '0 0 12px rgba(59,130,246,0.5)',
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Percentage + status label */}
-        <div className="mt-2 flex justify-between">
-          <span className="font-code text-sm text-blue-400">{pct}%</span>
-          <span className="text-sm text-[#4B5A8A] capitalize">{status.status}</span>
-        </div>
-
-        {/* Pipeline step indicators */}
-        <div className="mt-10 card p-5">
-          <div className="flex items-center justify-between">
-            {PIPELINE_STEPS.map((step, idx) => {
-              const isCompleted = idx < activeStep
-              const isActive = idx === activeStep
-
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {STEPS.map((s, i) => {
+              const active = i === activeStep
+              const done   = i < activeStep
               return (
-                <div key={step.label} className="flex items-center">
-                  <div className="flex flex-col items-center gap-2">
-                    <div
-                      className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${
-                        isCompleted
-                          ? 'bg-blue-600 text-white'
-                          : isActive
-                          ? 'bg-amber-500/20 border-2 border-amber-500 text-amber-400'
-                          : 'bg-[#0F1535] border border-[#1E2545] text-[#2D3A5E]'
-                      }`}
-                    >
-                      {step.icon}
-                    </div>
-                    <span
-                      className={`text-xs font-medium transition-colors duration-300 ${
-                        isCompleted
-                          ? 'text-blue-400'
-                          : isActive
-                          ? 'text-amber-400'
-                          : 'text-[#2D3A5E]'
-                      }`}
-                    >
-                      {step.label}
-                    </span>
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', gap: 16,
+                  padding: '14px 0',
+                  borderBottom: i < STEPS.length - 1 ? '1px solid var(--ink-line)' : 'none',
+                  opacity: done ? 0.4 : active ? 1 : 0.28,
+                  transition: 'opacity 300ms ease',
+                }}>
+                  <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: active ? 'var(--m-violet)' : 'var(--m-fg-3)', width: 24, flexShrink: 0 }}>0{i + 1}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: active ? 500 : 400, color: active ? 'var(--m-fg)' : 'var(--m-fg-2)' }}>{s.l}</div>
+                    <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--m-fg-3)', marginTop: 2 }}>{s.d}</div>
                   </div>
-
-                  {idx < PIPELINE_STEPS.length - 1 && (
-                    <div
-                      className={`h-px w-8 mb-5 mx-1 transition-colors duration-500 ${
-                        idx < activeStep ? 'bg-blue-600' : 'bg-[#1E2545]'
-                      }`}
-                    />
+                  {done && <span style={{ color: 'var(--m-good)', fontSize: 12 }}>✓</span>}
+                  {active && (
+                    <span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', border: '1.5px solid var(--m-violet)', borderTopColor: 'transparent', animation: 'spin 700ms linear infinite', flexShrink: 0 }} />
                   )}
                 </div>
               )
             })}
           </div>
         </div>
+
+        {/* Progress bar */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: 'var(--m-fg-3)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Progress</span>
+            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, color: 'var(--m-violet)' }}>{Math.floor(pct)}%</span>
+          </div>
+          <div style={{ height: 2, background: 'var(--ink-line)', borderRadius: 100, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${pct}%`, background: 'var(--m-violet)', transition: 'width 400ms linear', borderRadius: 100 }} />
+          </div>
+          <p style={{ marginTop: 8, fontSize: 12, color: 'var(--m-fg-3)', textAlign: 'center' }}>
+            {status.progress.step || 'Starting analysis…'}
+          </p>
+        </div>
+      </div>
+
+      {/* RIGHT — paper scan */}
+      <div style={{ background: 'var(--paper)', color: 'var(--paper-ink)', padding: '64px 72px', display: 'flex', flexDirection: 'column', gap: 32, position: 'relative', overflow: 'hidden' }}>
+        <div className="eyebrow-paper">Reflection — live</div>
+
+        {/* Product grid being revealed */}
+        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, alignContent: 'start' }}>
+          {Array.from({ length: 24 }).map((_, i) => {
+            const revealed = (i / 24) * 100 < pct + 8
+            return (
+              <div key={i} style={{
+                aspectRatio: '1',
+                borderRadius: 8,
+                border: '1px solid var(--paper-line)',
+                background: revealed ? 'rgba(0,0,0,0.04)' : 'var(--paper-2)',
+                position: 'relative', overflow: 'hidden',
+                transition: 'background 400ms ease',
+              }}>
+                <div style={{
+                  position: 'absolute', inset: 8,
+                  display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+                  opacity: revealed ? 1 : 0.2,
+                  transition: 'opacity 400ms ease',
+                }}>
+                  <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 9, opacity: 0.5 }}>P-{String(i + 1).padStart(3, '0')}</span>
+                  <div style={{
+                    height: 3, borderRadius: 100,
+                    background: revealed
+                      ? i % 5 === 0 ? 'var(--m-bad-p)' : i % 3 === 0 ? 'var(--m-warn-p)' : 'var(--m-good-p)'
+                      : 'var(--paper-line)',
+                  }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Ticker */}
+        <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 12, color: 'var(--paper-ink)', opacity: 0.7, padding: '12px 0', borderTop: '1px solid var(--paper-line)' }}>
+          <span style={{ color: 'var(--m-violet-2)' }}>›</span>{' '}
+          {STEPS[Math.min(activeStep, STEPS.length - 1)]?.l}…
+        </div>
+
+        {/* Scan line on paper */}
+        <div style={{
+          position: 'absolute', left: 0, right: 0, height: 2,
+          background: 'linear-gradient(to right, transparent, var(--m-violet-2), transparent)',
+          opacity: 0.4,
+          animation: 'scanMove 3.6s ease-in-out infinite',
+        }} />
       </div>
     </div>
   )

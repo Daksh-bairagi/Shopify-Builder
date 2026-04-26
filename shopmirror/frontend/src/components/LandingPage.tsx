@@ -1,108 +1,29 @@
 import { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
-import { BentoGrid, type BentoItem } from './ui/bento-grid'
-import { SplineScene } from './ui/splite'
-import { Spotlight } from './ui/spotlight'
-import {
-  TrendingUp,
-  CheckCircle,
-  Globe,
-  Zap,
-  Eye,
-  Search,
-  ArrowRight,
-  Sparkles,
-  ShieldCheck,
-  BarChart3,
-} from 'lucide-react'
 
 interface Props {
   onGetStarted: () => void
 }
 
-const FEATURES: BentoItem[] = [
-  {
-    title: 'AI Readiness Score',
-    meta: '0–100',
-    description:
-      'Get a precision score based on 19 AI commerce checks across 5 pillars: Discoverability, Completeness, Consistency, Trust, and Transaction.',
-    icon: <TrendingUp className="w-4 h-4 text-[#a995c9]" />,
-    status: 'Real-time',
-    tags: ['5 Pillars', 'Weighted', 'Instant'],
-    colSpan: 2,
-    hasPersistentHover: true,
-  },
-  {
-    title: 'Autonomous Fix Agent',
-    meta: 'LangGraph',
-    description:
-      'AI agent applies taxonomy mapping, metafield injection, and title improvements directly to your Shopify store.',
-    icon: <Zap className="w-4 h-4 text-[#f0c88d]" />,
-    status: 'Beta',
-    tags: ['Auto-apply', 'Rollback'],
-    cta: 'Approve fixes →',
-  },
-  {
-    title: 'Query Match Simulator',
-    meta: '5 queries',
-    description:
-      'Test how AI shopping agents respond to real buyer queries about your products using only your structured data.',
-    icon: <Search className="w-4 h-4 text-[#a0bbe3]" />,
-    status: 'Included',
-    tags: ['Buyer Queries', 'Gaps'],
-  },
-  {
-    title: 'AI Perception Gap',
-    meta: 'Gemini AI',
-    description:
-      'See exactly how LLMs perceive your store vs. how you intend to be positioned — and the specific gaps driving the difference.',
-    icon: <Eye className="w-4 h-4 text-[#f2b8c6]" />,
-    status: 'LLM-powered',
-    tags: ['Positioning', 'Intent', 'Gaps'],
-    colSpan: 2,
-    cta: 'See example →',
-  },
-  {
-    title: '5-Channel Compliance',
-    meta: 'AI Channels',
-    description:
-      "Check your store's readiness for Shopify Catalog, Google Shopping, Meta Catalog, Perplexity, and ChatGPT Shopping.",
-    icon: <Globe className="w-4 h-4 text-[#77b8a1]" />,
-    status: '5 Channels',
-    tags: ['Google', 'Meta', 'ChatGPT'],
-  },
+function ArrowRight({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+const PILLARS = [
+  { n: '01', label: 'Discoverability', desc: 'Schema, GTINs, taxonomy — can agents find you?' },
+  { n: '02', label: 'Completeness',    desc: 'Descriptions, materials, specs, sizes — all present?' },
+  { n: '03', label: 'Consistency',     desc: 'Prices, inventory, copy matching across channels.' },
+  { n: '04', label: 'Trust & Policies',desc: 'Returns, warranty, shipping — trust signals AI weights.' },
+  { n: '05', label: 'Transaction',     desc: 'Cart, checkout, payment options visible to agents.' },
 ]
 
-const STEPS = [
-  {
-    num: '01',
-    icon: <Search className="w-5 h-5" />,
-    title: 'Paste Your Store URL',
-    desc: 'Enter your Shopify store URL. Works instantly with public data — no login needed for the free scan.',
-  },
-  {
-    num: '02',
-    icon: <BarChart3 className="w-5 h-5" />,
-    title: '19 Checks Run Automatically',
-    desc: 'We audit catalog data, product completeness, AI query matching, MCP simulation, and multi-channel compliance.',
-  },
-  {
-    num: '03',
-    icon: <ShieldCheck className="w-5 h-5" />,
-    title: 'Get Score + Fix Plan',
-    desc: 'Receive your AI readiness score, perception gap analysis, and an actionable fix plan you can approve in one click.',
-  },
-]
-
-const STATS = [
-  { value: '19', label: 'AI Commerce Checks' },
-  { value: '5', label: 'Pillar Scores' },
-  { value: '5', label: 'AI Channels' },
-  { value: '<30s', label: 'Free Scan' },
-]
-
-function NavBar({ onGetStarted }: { onGetStarted: () => void }) {
+export default function LandingPage({ onGetStarted }: Props) {
+  const [mouseX, setMouseX] = useState(0.5)
   const [scrolled, setScrolled] = useState(false)
+
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20)
     window.addEventListener('scroll', onScroll, { passive: true })
@@ -110,386 +31,289 @@ function NavBar({ onGetStarted }: { onGetStarted: () => void }) {
   }, [])
 
   return (
-    <header
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        scrolled ? 'bg-background/80 backdrop-blur-md border-b border-border' : ''
-      }`}
+    <div
+      style={{ background: 'var(--ink)', color: 'var(--m-fg)', fontFamily: 'var(--font-geist)', minHeight: '100vh', overflowX: 'hidden' }}
+      onMouseMove={(e) => setMouseX(e.clientX / window.innerWidth)}
     >
-      <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center">
-            <Sparkles className="w-3.5 h-3.5 text-primary" />
+      {/* ── Sticky nav ──────────────────────────────────────────────── */}
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 50,
+        backdropFilter: 'blur(12px)',
+        background: scrolled ? 'rgba(14,13,18,0.85)' : 'rgba(14,13,18,0.5)',
+        borderBottom: scrolled ? '1px solid var(--ink-line)' : '1px solid transparent',
+        transition: 'background 300ms, border-color 300ms',
+      }}>
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 32px', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Logo />
+          <nav style={{ display: 'flex', gap: 28, alignItems: 'center' }}>
+            <a href="#how" style={{ fontFamily: 'var(--font-geist)', fontSize: 13, color: 'var(--m-fg-2)', textDecoration: 'none' }}>How it works</a>
+            <a href="#pillars" style={{ fontFamily: 'var(--font-geist)', fontSize: 13, color: 'var(--m-fg-2)', textDecoration: 'none' }}>What we check</a>
+            <button
+              onClick={onGetStarted}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px', borderRadius: 100, background: 'var(--m-fg)', color: 'var(--ink)', border: 'none', fontSize: 13, fontWeight: 500, cursor: 'pointer', transition: 'background 200ms' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--m-violet)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'var(--m-fg)')}
+            >
+              Audit my store <ArrowRight />
+            </button>
+          </nav>
+        </div>
+      </header>
+
+      {/* ── Hero ────────────────────────────────────────────────────── */}
+      <section style={{ position: 'relative', minHeight: '92vh' }}>
+        {/* grid bg texture */}
+        <div style={{
+          position: 'absolute', inset: 0, opacity: 0.35, pointerEvents: 'none',
+          backgroundImage: 'linear-gradient(to right,rgba(180,160,214,0.04) 1px,transparent 1px),linear-gradient(to bottom,rgba(180,160,214,0.04) 1px,transparent 1px)',
+          backgroundSize: '80px 80px',
+        }} />
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', minHeight: '92vh', position: 'relative' }}>
+
+          {/* LEFT — You */}
+          <div style={{ padding: '120px 64px 80px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div className="eyebrow" style={{ marginBottom: 28 }}>You — the merchant</div>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(52px,7vw,120px)', lineHeight: 0.92, letterSpacing: '-0.025em', fontWeight: 400, margin: 0, color: 'var(--m-fg)' }}>
+              You sell<br />
+              <span style={{ color: 'var(--m-violet)' }}>great</span><br />
+              <em style={{ fontStyle: 'italic' }}>products.</em>
+            </h1>
+            <p style={{ marginTop: 32, maxWidth: 460, fontSize: 17, lineHeight: 1.55, color: 'var(--m-fg-2)', fontFamily: 'var(--font-geist)' }}>
+              Premium, curated, built with care. That's the brand you've spent years growing — the one your customers know by heart.
+            </p>
           </div>
-          <span className="font-semibold text-foreground">
-            Shop<span className="text-primary">Mirror</span>
-          </span>
+
+          {/* RIGHT — Mirror */}
+          <div style={{
+            padding: '120px 64px 80px',
+            background: 'var(--paper)',
+            color: 'var(--paper-ink)',
+            display: 'flex', flexDirection: 'column', justifyContent: 'center',
+            position: 'relative',
+            transform: `skewX(${(mouseX - 0.5) * -0.3}deg)`,
+            transformOrigin: 'left center',
+            transition: 'transform 600ms ease',
+          }}>
+            <div className="eyebrow-paper" style={{ marginBottom: 28 }}>The mirror — what AI sees</div>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(52px,7vw,120px)', lineHeight: 0.92, letterSpacing: '-0.025em', fontWeight: 400, margin: 0, color: 'var(--paper-ink)', fontStyle: 'italic', opacity: 0.88 }}>
+              Generic<br />
+              store.<br />
+              <span style={{ color: 'var(--m-violet-2)', fontStyle: 'normal' }}>Invisible.</span>
+            </h1>
+            <p style={{ marginTop: 32, maxWidth: 460, fontSize: 17, lineHeight: 1.55, color: 'rgba(26,24,18,0.72)', fontFamily: 'var(--font-geist)' }}>
+              That's how AI shopping agents — Google, Meta, ChatGPT, Perplexity — read your store. Your story doesn't make it through their filter.
+            </p>
+          </div>
+
+          {/* Seam */}
+          <div className="seam-line" />
         </div>
 
-        <nav className="hidden md:flex items-center gap-6 text-sm text-muted-foreground">
-          <a href="#features" className="hover:text-foreground transition-colors">Features</a>
-          <a href="#how-it-works" className="hover:text-foreground transition-colors">How it works</a>
-        </nav>
+        {/* CTA strip */}
+        <div style={{ position: 'absolute', bottom: 56, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, zIndex: 10 }}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 100,
+            border: '1px solid var(--ink-line)', fontFamily: 'var(--font-geist-mono)', fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--m-fg-2)',
+          }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--m-violet)', display: 'inline-block' }} />
+            19 checks · 5 channels · ~30 second scan
+          </div>
+          <button
+            onClick={onGetStarted}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '16px 28px', borderRadius: 100, background: 'var(--m-fg)', color: 'var(--ink)', border: 'none', fontSize: 15, fontWeight: 500, cursor: 'pointer', fontFamily: 'var(--font-geist)' }}
+          >
+            See what AI sees of your store <ArrowRight size={16} />
+          </button>
+          <span style={{ fontFamily: 'var(--font-geist)', fontSize: 12, color: 'var(--m-fg-3)' }}>
+            Free public scan · admin token optional · no signup
+          </span>
+        </div>
+      </section>
 
-        <button
-          onClick={onGetStarted}
-          className="flex items-center gap-1.5 bg-primary text-primary-foreground text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity cursor-pointer"
-        >
-          Audit My Store
-          <ArrowRight className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </header>
+      {/* ── The Gap ─────────────────────────────────────────────────── */}
+      <section style={{ padding: '140px 0', borderTop: '1px solid var(--ink-line)' }}>
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 32px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 80, alignItems: 'start' }}>
+            <div>
+              <div className="eyebrow">The Gap</div>
+              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(36px,4vw,64px)', lineHeight: 1.0, letterSpacing: '-0.02em', margin: '24px 0 0', fontWeight: 400, color: 'var(--m-fg)' }}>
+                Your products<br />
+                are <em style={{ fontStyle: 'italic', color: 'var(--m-violet)' }}>invisible</em><br />
+                to AI agents.
+              </h2>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+              <p style={{ fontSize: 19, lineHeight: 1.55, color: 'var(--m-fg)', margin: 0 }}>
+                When a buyer asks ChatGPT, Perplexity or Google's AI for your product category — agents read your structured data, not your hero copy.
+              </p>
+              <p style={{ fontSize: 16, lineHeight: 1.55, color: 'var(--m-fg-2)', margin: 0 }}>
+                Missing GTINs, thin metafields, descriptions that don't surface what you actually make. The agent shrugs and recommends someone else.{' '}
+                <em style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>ShopMirror</em> tells you exactly what's getting lost — and fixes it autonomously.
+              </p>
+              <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+                <button onClick={onGetStarted} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '14px 22px', borderRadius: 100, background: 'var(--m-fg)', color: 'var(--ink)', border: 'none', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>
+                  Run my audit <ArrowRight />
+                </button>
+                <a href="#how" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '14px 22px', borderRadius: 100, background: 'none', color: 'var(--m-fg)', border: '1px solid var(--ink-line)', fontSize: 14, fontWeight: 500, cursor: 'pointer', textDecoration: 'none' }}>
+                  How it works
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── HOW ─────────────────────────────────────────────────────── */}
+      <section id="how" style={{ padding: '140px 0', borderTop: '1px solid var(--ink-line)' }}>
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 32px' }}>
+          <div className="eyebrow" style={{ display: 'block', textAlign: 'center', marginBottom: 16 }}>The Process</div>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(32px,4vw,60px)', lineHeight: 1.0, letterSpacing: '-0.02em', fontWeight: 400, margin: '0 0 80px', textAlign: 'center', color: 'var(--m-fg)' }}>
+            Three steps. <em style={{ fontStyle: 'italic', color: 'var(--m-violet)' }}>Sixty seconds.</em>
+          </h2>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 0 }}>
+            {[
+              { n: '01', t: 'Paste your URL', d: 'Public scan needs nothing more. Add your Admin token to unlock fixes.' },
+              { n: '02', t: 'Mirror runs 19 checks', d: 'Catalog completeness, taxonomy, metafields, AI query matching, multi-channel compliance — all in parallel.' },
+              { n: '03', t: 'Approve the fixes', d: 'Auto-fix, copy-paste, or manual — every change is reviewed before it ships, and every change is reversible.' },
+            ].map((s, i) => (
+              <div key={s.n} style={{ padding: '0 32px', borderRight: i < 2 ? '1px solid var(--ink-line)' : 'none', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: 64, color: 'var(--m-violet)', lineHeight: 1, letterSpacing: '-0.03em' }}>{s.n}</div>
+                <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 28, lineHeight: 1.05, fontWeight: 400, margin: 0, color: 'var(--m-fg)' }}>{s.t}</h3>
+                <p style={{ fontSize: 15, lineHeight: 1.55, color: 'var(--m-fg-2)', margin: 0 }}>{s.d}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── What we check ───────────────────────────────────────────── */}
+      <section id="pillars" style={{ padding: '140px 0', borderTop: '1px solid var(--ink-line)' }}>
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 32px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 80, alignItems: 'start', marginBottom: 64 }}>
+            <div>
+              <div className="eyebrow">The Audit</div>
+              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(32px,4vw,60px)', lineHeight: 1.0, letterSpacing: '-0.02em', fontWeight: 400, margin: '24px 0 0', color: 'var(--m-fg)' }}>
+                Five pillars.<br />
+                <em style={{ fontStyle: 'italic', color: 'var(--m-violet)' }}>Nineteen</em> checks.
+              </h2>
+            </div>
+            <p style={{ fontSize: 17, lineHeight: 1.55, color: 'var(--m-fg-2)', margin: 0, alignSelf: 'end' }}>
+              The score isn't a vibe. Each pillar is a weighted set of binary checks against the actual specs Google, Meta, OpenAI and Anthropic publish for AI commerce ingestion.
+            </p>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 16 }}>
+            {PILLARS.map((p) => (
+              <div key={p.n} style={{ background: 'var(--ink-2)', border: '1px solid var(--ink-line)', borderRadius: 18, padding: 24, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 200 }}>
+                <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--m-fg-3)', letterSpacing: '0.1em' }}>{p.n}</span>
+                <h3 style={{ fontFamily: 'var(--font-geist)', fontSize: 15, fontWeight: 600, margin: 0, color: 'var(--m-fg)', letterSpacing: '-0.01em' }}>{p.label}</h3>
+                <p style={{ fontSize: 12, color: 'var(--m-fg-3)', lineHeight: 1.5, margin: 0, flex: 1 }}>{p.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Sample score card ───────────────────────────────────────── */}
+      <section style={{ padding: '100px 0', borderTop: '1px solid var(--ink-line)' }}>
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 32px' }}>
+          <div className="eyebrow" style={{ display: 'block', textAlign: 'center', marginBottom: 16 }}>Example Report</div>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(28px,3vw,48px)', lineHeight: 1.05, fontWeight: 400, margin: '0 0 48px', textAlign: 'center', color: 'var(--m-fg)' }}>
+            Here's what your audit looks like.
+          </h2>
+          <div style={{ maxWidth: 720, margin: '0 auto', background: 'var(--ink-2)', border: '1px solid var(--ink-line)', borderRadius: 24, overflow: 'hidden' }}>
+            {/* score row */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid var(--ink-line)' }}>
+              <div style={{ padding: 32 }}>
+                <div className="eyebrow" style={{ marginBottom: 16 }}>AI Readiness Score</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: 96, lineHeight: 0.9, letterSpacing: '-0.04em', color: 'var(--m-fg)', position: 'relative', display: 'inline-block' }}>
+                  54
+                  <span style={{ position: 'absolute', right: -22, top: 10, fontSize: 14, color: 'var(--m-fg-3)', opacity: 0.55 }}>/100</span>
+                </div>
+                <div style={{ marginTop: 8, fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: 'var(--m-warn)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Needs work</div>
+              </div>
+              <div style={{ background: 'var(--paper)', color: 'var(--paper-ink)', padding: 32, borderLeft: '1px solid var(--m-violet-2)' }}>
+                <div className="eyebrow-paper" style={{ marginBottom: 16 }}>AI verdict</div>
+                <p style={{ fontFamily: 'var(--font-display)', fontSize: 18, lineHeight: 1.35, margin: 0, fontStyle: 'italic' }}>
+                  "Generic outdoor clothing store. Mid-range. No clear sustainability story."
+                </p>
+                <div style={{ marginTop: 12, fontFamily: 'var(--font-geist-mono)', fontSize: 10, opacity: 0.55 }}>— Gemini, GPT-4, Perplexity</div>
+              </div>
+            </div>
+            {/* pillar bars */}
+            <div style={{ padding: '20px 32px', display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12 }}>
+              {[
+                { l: 'Discoverability', s: 72 },
+                { l: 'Completeness',    s: 38 },
+                { l: 'Consistency',     s: 61 },
+                { l: 'Trust',           s: 45 },
+                { l: 'Transaction',     s: 55 },
+              ].map(p => {
+                const c = p.s >= 70 ? 'var(--m-info)' : p.s >= 45 ? 'var(--m-warn)' : 'var(--m-bad)'
+                return (
+                  <div key={p.l} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                      <span style={{ fontSize: 10, color: 'var(--m-fg-3)' }}>{p.l}</span>
+                      <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: c }}>{p.s}</span>
+                    </div>
+                    <div style={{ height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 100, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${p.s}%`, background: c, borderRadius: 100 }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Final CTA ───────────────────────────────────────────────── */}
+      <section style={{ padding: '120px 0', borderTop: '1px solid var(--ink-line)' }}>
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 32px', textAlign: 'center' }}>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(56px,8vw,128px)', lineHeight: 0.92, letterSpacing: '-0.025em', fontWeight: 400, margin: '0 0 48px', color: 'var(--m-fg)' }}>
+            Show me<br />
+            <em style={{ fontStyle: 'italic', color: 'var(--m-violet)' }}>the mirror.</em>
+          </h2>
+          <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
+            <button
+              onClick={onGetStarted}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '18px 32px', borderRadius: 100, background: 'var(--m-fg)', color: 'var(--ink)', border: 'none', fontSize: 16, fontWeight: 500, cursor: 'pointer', fontFamily: 'var(--font-geist)' }}
+            >
+              Audit my store — free <ArrowRight size={16} />
+            </button>
+            <span style={{ fontFamily: 'var(--font-geist)', fontSize: 12, color: 'var(--m-fg-3)' }}>~30 second scan · public data only · no signup</span>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Footer ──────────────────────────────────────────────────── */}
+      <footer style={{ padding: '40px 0', borderTop: '1px solid var(--ink-line)' }}>
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Logo />
+          <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: 'var(--m-fg-3)' }}>
+            Kasparro Agentic Commerce Hackathon · Track 5
+          </span>
+          <button onClick={onGetStarted} style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: 'var(--m-violet)', background: 'none', border: 'none', cursor: 'pointer' }}>
+            Start free audit →
+          </button>
+        </div>
+      </footer>
+    </div>
   )
 }
 
-export default function LandingPage({ onGetStarted }: Props) {
+function Logo({ inverted = false }: { inverted?: boolean }) {
+  const stroke = inverted ? 'var(--paper-ink)' : 'var(--m-fg)'
   return (
-    <div className="min-h-screen bg-background text-foreground font-sans relative overflow-x-hidden">
-
-      {/* ── Background layer 1: CSS ambient blobs (zero WebGL cost) ─────── */}
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-        {/* Purple blob — top right */}
-        <div
-          className="absolute rounded-full"
-          style={{
-            width: 700, height: 700,
-            top: -180, right: -160,
-            background: '#a995c9',
-            filter: 'blur(130px)',
-            opacity: 0.18,
-            animation: 'blobDrift 16s ease-in-out infinite',
-          }}
-        />
-        {/* Pink blob — bottom left */}
-        <div
-          className="absolute rounded-full"
-          style={{
-            width: 560, height: 560,
-            bottom: -100, left: -120,
-            background: '#f2b8c6',
-            filter: 'blur(110px)',
-            opacity: 0.12,
-            animation: 'blobDriftB 20s ease-in-out infinite',
-          }}
-        />
-        {/* Blue blob — center */}
-        <div
-          className="absolute rounded-full"
-          style={{
-            width: 420, height: 420,
-            top: '35%', left: '25%',
-            background: '#a0bbe3',
-            filter: 'blur(100px)',
-            opacity: 0.08,
-            animation: 'blobDriftC 24s ease-in-out infinite',
-          }}
-        />
-      </div>
-
-      {/* ── Background layer 2: Spotlight sweep (cheap SVG) ──────────── */}
-      <div className="fixed inset-0 z-[1] pointer-events-none overflow-hidden">
-        <Spotlight className="-top-40 left-0 md:left-40 md:-top-20" fill="#a995c9" />
-      </div>
-
-      {/* ── Navigation ────────────────────────────────────────────────── */}
-      <NavBar onGetStarted={onGetStarted} />
-
-      {/* ── All page content sits above backgrounds ───────────────────── */}
-      <div className="relative z-10">
-
-        {/* Hero — robot lives here as absolute, not fixed ────────────── */}
-        {/* absolute means it only renders while hero is in the viewport   */}
-        <section className="relative min-h-[88vh] pt-36 pb-20 px-6 overflow-hidden flex items-center">
-
-          {/* Robot — narrower, anchored to hero section */}
-          <div
-            className="absolute right-[-2%] top-0 bottom-0 w-[38vw] pointer-events-none opacity-60 hidden lg:block"
-          >
-            <SplineScene
-              scene="https://prod.spline.design/kZDDjO5HuC9GJUM2/scene.splinecode"
-              className="w-full h-full"
-            />
-          </div>
-
-          <div className="max-w-2xl mx-auto lg:mx-0 lg:pl-16 xl:pl-24">
-
-            {/* Badge */}
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-primary/10 text-primary border border-primary/20 mb-8"
-            >
-              <Sparkles className="w-3 h-3" />
-              Kasparro Agentic Commerce Hackathon · Track 5
-            </motion.div>
-
-            {/* Headline */}
-            <motion.h1
-              initial={{ opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.1 }}
-              className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight text-foreground leading-[1.1] mb-6"
-            >
-              Your products are
-              <br />
-              <span className="text-primary">invisible to AI</span>
-              <br />
-              shopping agents.
-            </motion.h1>
-
-            {/* Subheading */}
-            <motion.p
-              initial={{ opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-              className="text-lg text-muted-foreground max-w-xl mb-10 leading-relaxed"
-            >
-              ShopMirror audits your Shopify store against 19 AI commerce checks,
-              shows you exactly what AI agents can and cannot determine about your products,
-              and fixes it autonomously.
-            </motion.p>
-
-            {/* CTA buttons */}
-            <motion.div
-              initial={{ opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.3 }}
-              className="flex flex-col sm:flex-row gap-3 mb-14"
-            >
-              <button
-                onClick={onGetStarted}
-                className="flex items-center justify-center gap-2 bg-primary text-primary-foreground font-semibold text-base px-7 py-3.5 rounded-xl hover:opacity-90 active:scale-95 transition-all cursor-pointer"
-                style={{ boxShadow: '0 0 24px rgba(169,149,201,0.35)' }}
-              >
-                Audit My Store — Free
-                <ArrowRight className="w-4 h-4" />
-              </button>
-              <a
-                href="#how-it-works"
-                className="flex items-center justify-center gap-2 bg-card/70 backdrop-blur-sm border border-border text-foreground font-medium text-base px-7 py-3.5 rounded-xl hover:border-primary/40 hover:bg-primary/5 transition-all cursor-pointer"
-              >
-                See how it works
-              </a>
-            </motion.div>
-
-            {/* Stats */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.6, delay: 0.45 }}
-              className="flex flex-wrap gap-8"
-            >
-              {STATS.map((s) => (
-                <div key={s.label}>
-                  <div className="text-2xl font-bold text-foreground font-code">{s.value}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">{s.label}</div>
-                </div>
-              ))}
-            </motion.div>
-          </div>
-        </section>
-
-        {/* Score preview card ──────────────────────────────────────────── */}
-        <section className="px-6 pb-20">
-          <motion.div
-            initial={{ opacity: 0, y: 32 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.55 }}
-            className="max-w-xl mx-auto lg:mx-0 lg:ml-16 xl:ml-24"
-          >
-            <div className="bg-card/80 backdrop-blur-sm border border-border rounded-2xl p-6">
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-[#77b8a1]" />
-                  <span className="text-sm text-muted-foreground font-code">example-store.myshopify.com</span>
-                </div>
-                <span className="text-xs font-medium px-2 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 font-code">
-                  Full Audit
-                </span>
-              </div>
-
-              <div className="flex items-center gap-8">
-                <div className="text-center shrink-0">
-                  <div className="text-6xl font-bold text-foreground font-code leading-none">54</div>
-                  <div className="text-xs text-[#f0c88d] font-code mt-1">Needs Work</div>
-                  <div className="text-xs text-muted-foreground mt-1">AI Readiness Score</div>
-                </div>
-                <div className="flex-1 space-y-2.5">
-                  {[
-                    { name: 'Discoverability', score: 72, color: '#a995c9' },
-                    { name: 'Completeness',    score: 38, color: '#e57373' },
-                    { name: 'Consistency',     score: 61, color: '#a995c9' },
-                    { name: 'Trust & Policies',score: 45, color: '#f0c88d' },
-                    { name: 'Transaction',     score: 55, color: '#a0bbe3' },
-                  ].map((p) => (
-                    <div key={p.name} className="flex items-center gap-3">
-                      <div className="text-xs text-muted-foreground w-28 shrink-0">{p.name}</div>
-                      <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: `${p.score}%`, backgroundColor: p.color }} />
-                      </div>
-                      <div className="text-xs font-code text-foreground w-6 text-right">{p.score}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-5 pt-4 border-t border-border flex flex-wrap gap-2">
-                {[
-                  { label: 'Shopify', status: 'READY',   color: 'text-[#77b8a1] bg-[#77b8a1]/10 border-[#77b8a1]/20' },
-                  { label: 'Google',  status: 'PARTIAL', color: 'text-[#f0c88d] bg-[#f0c88d]/10 border-[#f0c88d]/20' },
-                  { label: 'Meta',    status: 'BLOCKED', color: 'text-[#e57373] bg-[#e57373]/10 border-[#e57373]/20' },
-                  { label: 'ChatGPT', status: 'PARTIAL', color: 'text-[#f0c88d] bg-[#f0c88d]/10 border-[#f0c88d]/20' },
-                  { label: 'Perplexity', status: 'READY', color: 'text-[#77b8a1] bg-[#77b8a1]/10 border-[#77b8a1]/20' },
-                ].map((ch) => (
-                  <span key={ch.label} className={`text-xs px-2.5 py-1 rounded-full border font-medium ${ch.color}`}>
-                    {ch.label} · {ch.status}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </motion.div>
-        </section>
-
-        {/* Features BentoGrid ──────────────────────────────────────────── */}
-        <section id="features" className="px-6 py-20">
-          <div className="max-w-6xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 24 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.6 }}
-              className="text-center mb-12"
-            >
-              <div className="inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-card/80 backdrop-blur-sm text-muted-foreground border border-border mb-4">
-                <CheckCircle className="w-3 h-3 text-primary" />
-                Full Audit Suite
-              </div>
-              <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-                Every angle of AI commerce visibility
-              </h2>
-              <p className="text-muted-foreground max-w-xl mx-auto">
-                ShopMirror covers the full stack — from structured data completeness to how AI agents
-                actually answer buyer questions about your store.
-              </p>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 32 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.7, delay: 0.1 }}
-            >
-              <BentoGrid items={FEATURES} />
-            </motion.div>
-          </div>
-        </section>
-
-        {/* How It Works ────────────────────────────────────────────────── */}
-        <section id="how-it-works" className="px-6 py-20">
-          <div className="max-w-5xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 24 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.6 }}
-              className="text-center mb-14"
-            >
-              <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-                From URL to fix plan in 3 steps
-              </h2>
-              <p className="text-muted-foreground max-w-lg mx-auto">
-                No complex setup. No agency required. Paste your URL and let ShopMirror do the work.
-              </p>
-            </motion.div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {STEPS.map((step, i) => (
-                <motion.div
-                  key={step.num}
-                  initial={{ opacity: 0, y: 24 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.5, delay: i * 0.12 }}
-                  className="relative bg-card/80 backdrop-blur-sm border border-border rounded-2xl p-6 hover:border-primary/30 transition-colors group"
-                >
-                  {i < STEPS.length - 1 && (
-                    <div className="hidden md:block absolute top-10 -right-3 w-6 h-px bg-border z-10" />
-                  )}
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary group-hover:bg-primary/20 transition-colors">
-                      {step.icon}
-                    </div>
-                    <span className="font-code text-2xl font-bold text-primary/40">{step.num}</span>
-                  </div>
-                  <h3 className="font-semibold text-foreground mb-2">{step.title}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{step.desc}</p>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Final CTA ───────────────────────────────────────────────────── */}
-        <section className="px-6 py-24">
-          <motion.div
-            initial={{ opacity: 0, y: 32 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
-            className="max-w-2xl mx-auto text-center"
-          >
-            <div className="relative bg-card/80 backdrop-blur-sm border border-primary/20 rounded-3xl px-8 py-14 overflow-hidden">
-              <div
-                className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-32 rounded-full blur-[60px] pointer-events-none"
-                style={{ background: 'rgba(169,149,201,0.15)' }}
-              />
-              <div className="relative">
-                <div className="w-12 h-12 rounded-2xl bg-primary/15 border border-primary/20 flex items-center justify-center mx-auto mb-6">
-                  <Sparkles className="w-6 h-6 text-primary" />
-                </div>
-                <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-                  Ready to win AI commerce?
-                </h2>
-                <p className="text-muted-foreground mb-8 max-w-md mx-auto">
-                  Free public scan in under 30 seconds. Add your Admin Token for the full audit,
-                  autonomous fixes, and your AI readiness certificate.
-                </p>
-                <button
-                  onClick={onGetStarted}
-                  className="inline-flex items-center gap-2 bg-primary text-primary-foreground font-semibold text-base px-8 py-4 rounded-xl hover:opacity-90 active:scale-95 transition-all cursor-pointer"
-                  style={{ boxShadow: '0 0 24px rgba(169,149,201,0.35)' }}
-                >
-                  Audit My Store — Free
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-                <p className="text-xs text-muted-foreground mt-4">
-                  No account needed · Public scan in 30s · Admin token optional
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        </section>
-
-        {/* Footer ──────────────────────────────────────────────────────── */}
-        <footer className="border-t border-border px-6 py-8">
-          <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <div className="w-5 h-5 rounded-md bg-primary/20 border border-primary/30 flex items-center justify-center">
-                <Sparkles className="w-2.5 h-2.5 text-primary" />
-              </div>
-              <span className="text-sm font-medium text-foreground">Shop<span className="text-primary">Mirror</span></span>
-            </div>
-            <p className="text-xs text-muted-foreground text-center">
-              Kasparro Agentic Commerce Hackathon · Track 5 · AI Representation Optimizer for Shopify
-            </p>
-            <button onClick={onGetStarted} className="text-xs text-primary hover:underline cursor-pointer">
-              Start free audit →
-            </button>
-          </div>
-        </footer>
-
-      </div>{/* end z-10 content wrapper */}
-    </div>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+      <svg width={32} height={32} viewBox="0 0 32 32" fill="none">
+        <circle cx="16" cy="16" r="14" stroke={stroke} strokeOpacity="0.25" strokeWidth="1" />
+        <path d="M9 11 Q16 8 23 11 M9 21 Q16 24 23 21" stroke={stroke} strokeWidth="1.4" strokeLinecap="round" fill="none" />
+        <line x1="16" y1="3" x2="16" y2="29" stroke="var(--m-violet)" strokeWidth="1" strokeDasharray="2 2" />
+      </svg>
+      <span style={{ fontFamily: 'var(--font-display)', fontSize: 20, letterSpacing: '-0.02em', color: stroke }}>
+        Shop<em style={{ fontStyle: 'italic', color: 'var(--m-violet)' }}>Mirror</em>
+      </span>
+    </span>
   )
 }

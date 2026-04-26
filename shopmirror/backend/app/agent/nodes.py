@@ -52,19 +52,24 @@ CHECK_TO_FIX_TYPE: dict[str, str] = {
     "C4":  "fill_metafield",         # Missing GTIN/barcode → fill_metafield
     "C5":  "fill_metafield",         # Missing specifications → fill_metafield
     "C6":  "fill_metafield",         # Missing material → fill_metafield
-    "Con1": "inject_schema_script",  # Missing/inconsistent schema markup → inject_schema_script
+    "Con1": "generate_schema_snippet",  # Missing/inconsistent schema markup -> copy-paste snippet
     "Con2": "fill_metafield",        # Metafield inconsistency → fill_metafield
     "Con3": "fill_metafield",        # SEO field inconsistency (Mode B) → fill_metafield
     "T1":  "suggest_policy_fix",     # No refund policy
     "T2":  "suggest_policy_fix",     # No shipping policy
-    "T4":  "inject_schema_script",   # Missing JSON-LD schema markup
+    "T4":  "generate_schema_snippet", # Missing JSON-LD schema markup -> copy-paste snippet
 }
 
 # Store-level fix types get a single fix item regardless of affected product count
-STORE_LEVEL_TYPES = {"inject_schema_script", "create_metafield_definitions", "suggest_policy_fix"}
+STORE_LEVEL_TYPES = {
+    "inject_schema_script",
+    "generate_schema_snippet",
+    "create_metafield_definitions",
+    "suggest_policy_fix",
+}
 
 
-def generate_fix_plan(findings: list[Finding]) -> list[FixItem]:
+def generate_fix_plan(findings: list[Finding], merchant_data=None) -> list[FixItem]:
     """Map audit findings to ordered FixItem list.
 
     Rules:
@@ -72,6 +77,12 @@ def generate_fix_plan(findings: list[Finding]) -> list[FixItem]:
     - Store-level fix types: one FixItem for the whole store, deduplicated
     - Sorted by DEPENDENCY_ORDER then severity_weight * affected_count desc
     """
+    # Build product id → title lookup for human-readable fix descriptions
+    product_titles: dict[str, str] = {}
+    if merchant_data and hasattr(merchant_data, "products"):
+        for p in merchant_data.products:
+            product_titles[p.id] = p.title
+
     items: list[FixItem] = []
     seen_store_level: set[str] = set()
 
@@ -79,6 +90,16 @@ def generate_fix_plan(findings: list[Finding]) -> list[FixItem]:
         fix_type = CHECK_TO_FIX_TYPE.get(finding.check_id)
         if fix_type is None:
             continue
+
+        # Map fix_type to its execution category
+        if fix_type in ("generate_schema_snippet", "suggest_policy_fix"):
+            item_fix_type = "copy_paste"
+        elif fix_type in ("inject_schema_script", "create_metafield_definitions",
+                          "map_taxonomy", "classify_product_type", "improve_title",
+                          "fill_metafield", "generate_alt_text"):
+            item_fix_type = "auto"
+        else:
+            item_fix_type = "manual"
 
         if fix_type in STORE_LEVEL_TYPES:
             if fix_type in seen_store_level:
@@ -88,13 +109,16 @@ def generate_fix_plan(findings: list[Finding]) -> list[FixItem]:
                 fix_id=str(uuid.uuid4()),
                 type=fix_type,
                 product_id="",
-                product_title="(store-level)",
+                product_title="",
                 field=finding.check_id,
                 current_value=None,
                 proposed_value=f"Fix for {finding.title}",
                 reason=finding.detail,
                 risk="LOW",
                 reversible=fix_type != "suggest_policy_fix",
+                severity=finding.severity,
+                fix_type=item_fix_type,
+                check_id=finding.check_id,
             ))
         else:
             for product_id in finding.affected_products[:20]:  # cap at 20 products per finding
@@ -102,13 +126,16 @@ def generate_fix_plan(findings: list[Finding]) -> list[FixItem]:
                     fix_id=str(uuid.uuid4()),
                     type=fix_type,
                     product_id=product_id,
-                    product_title="",
+                    product_title=product_titles.get(product_id, ""),
                     field=finding.check_id,
                     current_value=None,
                     proposed_value=f"Fix for {finding.title}",
                     reason=finding.detail,
                     risk="LOW",
                     reversible=True,
+                    severity=finding.severity,
+                    fix_type=item_fix_type,
+                    check_id=finding.check_id,
                 ))
 
     # Sort: primary by DEPENDENCY_ORDER index, secondary by severity weight desc
@@ -344,8 +371,8 @@ FIX_TYPE_RESOLVES: dict[str, list[str]] = {
     "improve_title":               ["C2"],
     "fill_metafield":              ["C3", "C4", "C5", "C6", "Con2", "Con3"],
     "generate_alt_text":           ["C6"],
-    "inject_schema_script":        ["Con1", "T4"],
-    "generate_schema_snippet":     ["T4"],
+    "inject_schema_script":        [],
+    "generate_schema_snippet":     [],
     "suggest_policy_fix":          ["T1", "T2"],
     "create_metafield_definitions": ["C5"],
 }
@@ -396,8 +423,8 @@ def _compute_before_after(
             resolved_check_ids.update(FIX_TYPE_RESOLVES[fix_type])
 
         content = fix_result.shopify_gid if hasattr(fix_result, "shopify_gid") else (fix_result.get("shopify_gid") or "")
-        if content and fix_type in ("generate_schema_snippet", "suggest_policy_fix"):
-            label = "JSON-LD Schema Snippet" if fix_type == "generate_schema_snippet" else "Policy Draft"
+        if content and fix_type in ("generate_schema_snippet", "inject_schema_script", "suggest_policy_fix"):
+            label = "Policy Draft" if fix_type == "suggest_policy_fix" else "JSON-LD Schema Snippet"
             copy_paste_items.append({"label": label, "content": content, "fix_id": fix_id})
 
     current_failing = original_failing - resolved_check_ids
