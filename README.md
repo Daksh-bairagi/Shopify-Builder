@@ -4,7 +4,7 @@ ShopMirror is an AI representation auditor for Shopify merchants. It analyzes st
 
 ## Problem Statement
 
-Many Shopify stores have good products but weak AI-facing data. Missing taxonomy, inconsistent trust signals, incomplete product attributes, and weak structured catalog data make it harder for AI shopping systems to classify, trust, and surface products. ShopMirror makes those gaps visible and turns them into an actionable remediation workflow.
+Many Shopify stores have good products but weak AI-facing data. Missing taxonomy, inconsistent trust signals, incomplete product attributes, and weak structured catalog data make it harder for AI shopping systems to classify, trust, and surface products. ShopMirror addresses this as a Track 5 problem by making those representation gaps visible and turning them into an actionable remediation workflow.
 
 ## Features
 
@@ -51,7 +51,7 @@ Test suites live in `shopmirror/backend/tests/white_box/` and `shopmirror/backen
 
 Add the 3-5 minute narrated walkthrough link here.
 
-- Demo link: `TBD`
+- Demo link: https://drive.google.com/file/d/1CcnzKo2OSRM1Wp47D4TLg0LcpFdnoi4P/view?usp=sharing
 
 ## Repository Contents
 
