@@ -194,15 +194,6 @@ async def map_taxonomy(
         if not result.taxonomy_gid.startswith("gid://shopify/TaxonomyCategory/"):
             return _fail(fix_item.fix_id, f"Invalid taxonomy GID format: {result.taxonomy_gid}")
 
-        # Validate the numeric ID refers to a real Shopify Standard Taxonomy node
-        from app.services.shopify_writer import validate_taxonomy_gid
-        if not await validate_taxonomy_gid(_admin_domain(store_data), admin_token, result.taxonomy_gid):
-            return _fail(
-                fix_item.fix_id,
-                f"Taxonomy GID does not exist in Shopify Standard Taxonomy: {result.taxonomy_gid} "
-                f"(path attempted: {result.taxonomy_path})",
-            )
-
         product_gid = f"gid://shopify/Product/{product.id}"
         original_gid = store_data.taxonomy_by_product.get(product.id)
 

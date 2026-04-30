@@ -14,6 +14,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import os
 import re
 import uuid
 from typing import Literal
@@ -629,6 +630,59 @@ def _compute_before_after(original_report: dict, post_fix_findings: list[Finding
     }
 
 
+def _estimate_post_fix_findings(
+    original_report: dict,
+    fix_plan: list[FixItem],
+    verification_results: dict[str, bool],
+) -> list[Finding]:
+    """Cheap post-fix estimate used to avoid a full store re-audit on every execute.
+
+    We start from the original report findings and remove the findings that were
+    resolved by verified successful fixes. For product-level fixes we only remove
+    the affected product from the finding; for store-level fixes we drop the
+    whole finding.
+    """
+    findings = [Finding(**finding) for finding in (original_report.get("findings") or [])]
+    fix_by_id = {fix.fix_id: fix for fix in fix_plan}
+
+    for fix_id, verified in (verification_results or {}).items():
+        if not verified:
+            continue
+        fix = fix_by_id.get(fix_id)
+        if fix is None:
+            continue
+
+        updated_findings: list[Finding] = []
+        for finding in findings:
+            if finding.check_id != fix.check_id:
+                updated_findings.append(finding)
+                continue
+
+            if fix.product_id:
+                if fix.product_id not in finding.affected_products:
+                    updated_findings.append(finding)
+                    continue
+
+                remaining_products = [pid for pid in finding.affected_products if pid != fix.product_id]
+                if not remaining_products:
+                    continue
+
+                updated_findings.append(
+                    dataclasses.replace(
+                        finding,
+                        affected_products=remaining_products,
+                        affected_count=max(0, finding.affected_count - 1),
+                    )
+                )
+            else:
+                # Store-level fix verified successfully: remove the finding.
+                continue
+
+        findings = updated_findings
+
+    return findings
+
+
 # ---------------------------------------------------------------------------
 # reporter_node
 # ---------------------------------------------------------------------------
@@ -673,39 +727,78 @@ async def reporter_node(state: StoreOptimizationState) -> dict:
         "mcp_after": None,
     }
     refreshed_report_fields: dict = {}
-    try:
-        from app.services.ingestion import fetch_admin_data
-        from app.services.heuristics import run_all_checks
-        from app.services.llm_analysis import analyze_products
+    full_reaudit = os.getenv("SHOPMIRROR_FULL_REAUDIT_AFTER_FIX", "").strip().lower() in {"1", "true", "yes"}
+    if full_reaudit:
+        try:
+            from app.services.ingestion import fetch_admin_data
+            from app.services.heuristics import run_all_checks
+            from app.services.llm_analysis import analyze_products
+            from app.services.report_builder import (
+                calculate_ai_readiness_score,
+                calculate_channel_compliance,
+                calculate_pillar_scores,
+                get_worst_products,
+            )
+            from app.services.bot_audit import audit_bot_access
+            from app.services.identifier_audit import audit_identifiers
+            from app.services.golden_record import score_store
+            from app.services.trust_signals import score_trust_signals
+            from app.services.feed_generator import (
+                build_chatgpt_feed,
+                build_google_feed,
+                build_perplexity_feed,
+            )
+            from app.services.llms_txt import generate_llms_txt
+
+            store_url = (job_row or {}).get("store_url") or f"https://{state['store_data'].store_domain}"
+            refreshed = await fetch_admin_data(store_url, state["admin_token"])
+            llm_results = await analyze_products(refreshed.products)
+            post_fix_findings = run_all_checks(refreshed, llm_results=llm_results)
+            before_after = _compute_before_after(original_report, post_fix_findings)
+            pillar_scores = calculate_pillar_scores(post_fix_findings)
+            all_products = get_worst_products(refreshed.products, post_fix_findings, n=len(refreshed.products))
+            refreshed_report_fields = {
+                "store_name": refreshed.store_name,
+                "store_domain": refreshed.store_domain,
+                "ingestion_mode": refreshed.ingestion_mode,
+                "total_products": len(refreshed.products),
+                "findings": [dataclasses.asdict(finding) for finding in post_fix_findings],
+                "pillars": {
+                    pillar: dataclasses.asdict(score)
+                    for pillar, score in pillar_scores.items()
+                },
+                "ai_readiness_score": calculate_ai_readiness_score(pillar_scores),
+                "channel_compliance": dataclasses.asdict(calculate_channel_compliance(post_fix_findings)),
+                "worst_5_products": [dataclasses.asdict(product) for product in all_products[:5]],
+                "all_products": [dataclasses.asdict(product) for product in all_products],
+                "bot_access": audit_bot_access(refreshed.robots_txt),
+                "identifier_audit": audit_identifiers(refreshed),
+                "golden_record": score_store(refreshed),
+                "trust_signals": score_trust_signals(refreshed),
+                "feed_summaries": {
+                    "chatgpt": build_chatgpt_feed(refreshed)["summary"],
+                    "perplexity": build_perplexity_feed(refreshed)["summary"],
+                    "google": build_google_feed(refreshed)["summary"],
+                },
+                "llms_txt_preview": generate_llms_txt(refreshed)[:1500],
+            }
+        except Exception as exc:
+            logger.warning("reporter_node: post-fix re-audit failed for job %s: %s", job_id, exc)
+    else:
         from app.services.report_builder import (
             calculate_ai_readiness_score,
             calculate_channel_compliance,
             calculate_pillar_scores,
-            get_worst_products,
         )
-        from app.services.bot_audit import audit_bot_access
-        from app.services.identifier_audit import audit_identifiers
-        from app.services.golden_record import score_store
-        from app.services.trust_signals import score_trust_signals
-        from app.services.feed_generator import (
-            build_chatgpt_feed,
-            build_google_feed,
-            build_perplexity_feed,
-        )
-        from app.services.llms_txt import generate_llms_txt
 
-        store_url = (job_row or {}).get("store_url") or f"https://{state['store_data'].store_domain}"
-        refreshed = await fetch_admin_data(store_url, state["admin_token"])
-        llm_results = await analyze_products(refreshed.products)
-        post_fix_findings = run_all_checks(refreshed, llm_results=llm_results)
+        post_fix_findings = _estimate_post_fix_findings(
+            original_report,
+            fix_plan,
+            state.get("verification_results") or {},
+        )
         before_after = _compute_before_after(original_report, post_fix_findings)
         pillar_scores = calculate_pillar_scores(post_fix_findings)
-        all_products = get_worst_products(refreshed.products, post_fix_findings, n=len(refreshed.products))
         refreshed_report_fields = {
-            "store_name": refreshed.store_name,
-            "store_domain": refreshed.store_domain,
-            "ingestion_mode": refreshed.ingestion_mode,
-            "total_products": len(refreshed.products),
             "findings": [dataclasses.asdict(finding) for finding in post_fix_findings],
             "pillars": {
                 pillar: dataclasses.asdict(score)
@@ -713,21 +806,7 @@ async def reporter_node(state: StoreOptimizationState) -> dict:
             },
             "ai_readiness_score": calculate_ai_readiness_score(pillar_scores),
             "channel_compliance": dataclasses.asdict(calculate_channel_compliance(post_fix_findings)),
-            "worst_5_products": [dataclasses.asdict(product) for product in all_products[:5]],
-            "all_products": [dataclasses.asdict(product) for product in all_products],
-            "bot_access": audit_bot_access(refreshed.robots_txt),
-            "identifier_audit": audit_identifiers(refreshed),
-            "golden_record": score_store(refreshed),
-            "trust_signals": score_trust_signals(refreshed),
-            "feed_summaries": {
-                "chatgpt": build_chatgpt_feed(refreshed)["summary"],
-                "perplexity": build_perplexity_feed(refreshed)["summary"],
-                "google": build_google_feed(refreshed)["summary"],
-            },
-            "llms_txt_preview": generate_llms_txt(refreshed)[:1500],
         }
-    except Exception as exc:
-        logger.warning("reporter_node: post-fix re-audit failed for job %s: %s", job_id, exc)
 
     before_after["manual_action_items"] = [dataclasses.asdict(m) for m in manual]
 
