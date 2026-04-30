@@ -3,9 +3,11 @@ import dataclasses
 import logging
 from contextlib import asynccontextmanager
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.connection import close_pool, get_pool
@@ -16,6 +18,7 @@ from app.db.queries import (
     update_job_error,
     update_job_fix_plan,
     update_job_report,
+    update_job_store_domain,
     update_job_status,
 )
 from app.schemas import (
@@ -23,6 +26,7 @@ from app.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     BeforeAfterResponse,
+    CompetitorRequest,
     CopyRewriteRequest,
     ExecuteRequest,
     ExecuteResponse,
@@ -30,23 +34,12 @@ from app.schemas import (
     FixPlanResponse,
     JobProgressResponse,
     JobStatusResponse,
-    QueryMatchResponse,
     RollbackRequest,
     RollbackResponse,
 )
 from app.utils.validators import validate_shopify_url
 from fastapi import Response
 from fastapi.responses import PlainTextResponse
-
-# Route implementations (to be added per day plan):
-#   POST /analyze                      — Day 2, schemas: AnalyzeRequest, AnalyzeResponse
-#   GET  /jobs/{id}                    — Day 2, schemas: JobStatusResponse
-#   GET  /jobs/{id}/query-match        — Day 3, schemas: QueryMatchResponse (query param: query: str)
-#   GET  /jobs/{id}/fix-plan           — Day 6, schemas: FixPlanResponse
-#   POST /jobs/{id}/execute            — Day 6, schemas: ExecuteRequest, ExecuteResponse
-#   POST /jobs/{id}/rollback/{fix_id}  — Day 6, schemas: RollbackResponse
-#   GET  /jobs/{id}/before-after       — Day 7, schemas: BeforeAfterResponse
-# All request/response shapes live in app/schemas.py
 
 
 @asynccontextmanager
@@ -71,7 +64,41 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[
+        "Content-Disposition",
+        "X-Feed-Total-Items",
+        "X-Feed-Total-Lines",
+        "X-Feed-Currency",
+        "X-Skipped-No-Identifier",
+        "X-Ingestion-Mode",
+    ],
 )
+
+
+def _resolve_admin_token(query_token: str | None, header_token: str | None) -> str | None:
+    """Prefer the header-supplied token (private) over the query string (legacy/fallback)."""
+    return header_token or query_token
+
+
+def _friendly_background_error(exc: Exception, phase: str) -> str:
+    """Convert low-level background-task exceptions into operator-friendly UI text."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        url = str(exc.request.url)
+        if status == 401 and "/admin/api/" in url:
+            return (
+                "Shopify Admin API rejected the admin token for this store (401 Unauthorized). "
+                "This usually means the token is wrong, revoked, belongs to a different Shopify store, "
+                "or the custom app is missing required Admin API scopes."
+            )
+        if status == 403 and "/admin/api/" in url:
+            return (
+                "Shopify Admin API denied access for this custom app (403 Forbidden). "
+                "The token is valid but the app likely does not have the required Admin API scopes "
+                "for this action."
+            )
+        return f"{phase} failed with HTTP {status}: {exc}"
+    return str(exc)
 
 
 @app.get("/health")
@@ -115,65 +142,8 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
             step=row["progress_step"] or "",
             pct=row["progress_pct"] or 0,
         ),
-        report=row["report_json"] if row["status"] in {"complete", "awaiting_approval"} else None,
+        report=row["report_json"] if row["status"] in {"complete", "awaiting_approval", "failed"} else None,
         error=row["error_message"],
-    )
-
-
-# ---------------------------------------------------------------------------
-# GET /jobs/{job_id}/query-match
-# ---------------------------------------------------------------------------
-
-@app.get("/jobs/{job_id}/query-match")
-async def query_match(job_id: str, query: str) -> QueryMatchResponse:
-    row = await get_job(job_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    report_json = row["report_json"]
-    if report_json is None:
-        raise HTTPException(status_code=400, detail="Job not yet complete")
-
-    # Try to find the closest pre-computed query match result from the stored report.
-    # Full re-matching requires live product data (not stored in DB), so we fall back
-    # to keyword matching against product titles from all_products in the stored report.
-    precomputed: list[dict] = report_json.get("query_match_results") or []
-    all_products: list[dict] = report_json.get("all_products") or report_json.get("worst_5_products") or []
-    total_products: int = report_json.get("total_products", 0)
-
-    # Check if any pre-computed result contains the query as a substring (case-insensitive)
-    query_lower = query.lower()
-    for result in precomputed:
-        if query_lower in result.get("query", "").lower():
-            return QueryMatchResponse(
-                query=query,
-                matched_product_ids=result.get("matched_product_ids", []),
-                total_products=result.get("total_products", total_products),
-                match_count=result.get("match_count", 0),
-                failing_attributes=result.get("failing_attributes", {}),
-            )
-
-    # Fallback: lightweight title-based match from stored product summaries
-    query_words = [w for w in query_lower.split() if len(w) > 2]
-    matched_ids: list[str] = []
-    failing_attrs: dict[str, int] = {}
-    for p in all_products:
-        title_lower = p.get("title", "").lower()
-        failing_checks = set(p.get("failing_check_ids", []))
-        if any(w in title_lower for w in query_words):
-            # Only "match" if product isn't failing C1/C2 (product type + title)
-            if "C1" not in failing_checks and "C2" not in failing_checks:
-                matched_ids.append(p["product_id"])
-            else:
-                for cid in failing_checks:
-                    failing_attrs[cid] = failing_attrs.get(cid, 0) + 1
-
-    return QueryMatchResponse(
-        query=query,
-        matched_product_ids=matched_ids,
-        total_products=total_products,
-        match_count=len(matched_ids),
-        failing_attributes=failing_attrs,
     )
 
 
@@ -205,7 +175,7 @@ async def execute_fixes(
     row = await get_job(job_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    if row["status"] not in ("awaiting_approval", "complete"):
+    if row["status"] != "awaiting_approval":
         raise HTTPException(status_code=400, detail="Job not in a state that allows fix execution")
     if not row["has_token"]:
         raise HTTPException(status_code=403, detail="Fix execution requires admin token")
@@ -225,20 +195,45 @@ async def rollback_fix(job_id: str, fix_id: str, request: RollbackRequest) -> Ro
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    from app.db.queries import get_fix_backup
+    from app.db.queries import get_fix_backup, list_fix_backups_for_prefix
     backup = await get_fix_backup(fix_id)
-    if backup is None:
-        raise HTTPException(status_code=404, detail="Fix backup not found")
+    backups = [backup] if backup is not None else await list_fix_backups_for_prefix(f"{fix_id}_")
+    backups = [row for row in backups if row.get("job_id") == job_id]
+    if not backups:
+        raise HTTPException(status_code=404, detail="Fix backup not found for this job")
 
     store_domain = row.get("store_domain") or row["store_url"].replace("https://", "").split("/")[0]
 
     from app.services.shopify_writer import rollback_fix as do_rollback
     try:
-        field, restored_value = await do_rollback(fix_id, store_domain, request.admin_token)
+        field, restored_value = await do_rollback(
+            fix_id,
+            store_domain,
+            request.admin_token,
+            expected_job_id=job_id,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+    # Persist rollback into the stored agent_run so a page refresh keeps the
+    # "Reversed" status visible instead of reverting to "Applied".
+    try:
+        report_json = row.get("report_json") or {}
+        agent_run = report_json.get("agent_run") or {}
+        rolled_ids = set(agent_run.get("rolled_back_fix_ids") or [])
+        # Mark every backup matching this fix_id (or prefix) as rolled back in the report.
+        for b in backups:
+            rolled_ids.add(b["fix_id"])
+        agent_run["rolled_back_fix_ids"] = sorted(rolled_ids)
+        # Also mark inside executed_fixes so the dashboard renders a Reversed badge.
+        for ef in agent_run.get("executed_fixes") or []:
+            if ef.get("fix_id") in rolled_ids:
+                ef["rolled_back"] = True
+        await patch_report_section(job_id, "agent_run", agent_run)
+    except Exception as exc:
+        logger.warning("rollback persist failed for %s/%s: %s", job_id, fix_id, exc)
 
     return RollbackResponse(status="rolled_back", field=field, restored_value=restored_value)
 
@@ -327,15 +322,25 @@ async def get_trust_signals(job_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 @app.get("/jobs/{job_id}/llms-txt", response_class=PlainTextResponse)
-async def get_llms_txt(job_id: str, admin_token: str | None = None) -> PlainTextResponse:
-    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=admin_token)
+async def get_llms_txt(
+    job_id: str,
+    admin_token: str | None = None,
+    x_admin_token: str | None = Header(default=None),
+) -> PlainTextResponse:
+    token = _resolve_admin_token(admin_token, x_admin_token)
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=token)
     from app.services.llms_txt import generate_llms_txt
     return PlainTextResponse(generate_llms_txt(merchant_data), media_type="text/plain; charset=utf-8")
 
 
 @app.get("/jobs/{job_id}/llms-full-txt", response_class=PlainTextResponse)
-async def get_llms_full_txt(job_id: str, admin_token: str | None = None) -> PlainTextResponse:
-    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=admin_token)
+async def get_llms_full_txt(
+    job_id: str,
+    admin_token: str | None = None,
+    x_admin_token: str | None = Header(default=None),
+) -> PlainTextResponse:
+    token = _resolve_admin_token(admin_token, x_admin_token)
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=token)
     from app.services.llms_txt import generate_llms_full_txt
     return PlainTextResponse(generate_llms_full_txt(merchant_data), media_type="text/plain; charset=utf-8")
 
@@ -345,8 +350,13 @@ async def get_llms_full_txt(job_id: str, admin_token: str | None = None) -> Plai
 # ---------------------------------------------------------------------------
 
 @app.get("/jobs/{job_id}/schema-package")
-async def get_schema_package(job_id: str, admin_token: str | None = None) -> dict:
-    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=admin_token)
+async def get_schema_package(
+    job_id: str,
+    admin_token: str | None = None,
+    x_admin_token: str | None = Header(default=None),
+) -> dict:
+    token = _resolve_admin_token(admin_token, x_admin_token)
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=token)
     from app.services.schema_enricher import generate_schema_package
     return generate_schema_package(merchant_data)
 
@@ -359,8 +369,13 @@ async def get_schema_package(job_id: str, admin_token: str | None = None) -> dic
 # than the stored audit.
 
 @app.get("/jobs/{job_id}/feeds/chatgpt")
-async def get_chatgpt_feed(job_id: str, admin_token: str | None = None) -> Response:
-    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=admin_token)
+async def get_chatgpt_feed(
+    job_id: str,
+    admin_token: str | None = None,
+    x_admin_token: str | None = Header(default=None),
+) -> Response:
+    token = _resolve_admin_token(admin_token, x_admin_token)
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=token)
     from app.services.feed_generator import build_chatgpt_feed
     feed = build_chatgpt_feed(merchant_data)
     return Response(
@@ -380,8 +395,13 @@ async def get_chatgpt_feed(job_id: str, admin_token: str | None = None) -> Respo
 # ---------------------------------------------------------------------------
 
 @app.get("/jobs/{job_id}/feeds/perplexity")
-async def get_perplexity_feed(job_id: str, admin_token: str | None = None) -> Response:
-    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=admin_token)
+async def get_perplexity_feed(
+    job_id: str,
+    admin_token: str | None = None,
+    x_admin_token: str | None = Header(default=None),
+) -> Response:
+    token = _resolve_admin_token(admin_token, x_admin_token)
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=token)
     from app.services.feed_generator import build_perplexity_feed
     feed = build_perplexity_feed(merchant_data)
     return Response(
@@ -401,8 +421,13 @@ async def get_perplexity_feed(job_id: str, admin_token: str | None = None) -> Re
 # ---------------------------------------------------------------------------
 
 @app.get("/jobs/{job_id}/feeds/google")
-async def get_google_feed(job_id: str, admin_token: str | None = None) -> Response:
-    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=admin_token)
+async def get_google_feed(
+    job_id: str,
+    admin_token: str | None = None,
+    x_admin_token: str | None = Header(default=None),
+) -> Response:
+    token = _resolve_admin_token(admin_token, x_admin_token)
+    merchant_data = await _load_merchant_data_for_job(job_id, admin_token=token)
     from app.services.feed_generator import build_google_feed
     feed = build_google_feed(merchant_data)
     return Response(
@@ -487,6 +512,59 @@ async def post_faq_schema(job_id: str, request: FAQRequest) -> dict:
     return {"count": len(faqs), "faqs": faqs}
 
 
+# ---------------------------------------------------------------------------
+# POST /jobs/{job_id}/competitors — on-demand competitor analysis
+# ---------------------------------------------------------------------------
+
+@app.post("/jobs/{job_id}/competitors")
+async def post_competitors(job_id: str, request: CompetitorRequest) -> dict:
+    """Run competitor analysis for a completed job.
+
+    If competitor_urls is empty, SerpAPI / DuckDuckGo auto-discovery is used.
+    Results are also patched back into the stored report for future /jobs/{id} calls.
+    """
+    row = await get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Re-ingest public merchant data (needed for product_types + store context)
+    merchant_data = await _load_merchant_data_for_job(job_id)
+
+    # Reconstruct findings from stored report so we can compute gaps
+    report_json = row.get("report_json") or {}
+    findings_raw = report_json.get("findings", [])
+    from app.models.findings import Finding
+    findings = [Finding(**f) for f in findings_raw]
+
+    from app.services.competitor import run_competitor_analysis_with_meta
+    results, meta = await run_competitor_analysis_with_meta(
+        merchant_data=merchant_data,
+        merchant_findings=findings,
+        competitor_urls=request.competitor_urls if request.competitor_urls else None,
+    )
+
+    # Persist so the next /jobs/{id} poll returns competitor_comparison
+    try:
+        await patch_report_section(
+            job_id,
+            "competitor_comparison",
+            [dataclasses.asdict(r) for r in results],
+        )
+    except Exception as exc:
+        logger.warning("competitor patch failed for %s: %s", job_id, exc)
+
+    return {
+        "results": [dataclasses.asdict(r) for r in results],
+        "status": meta.status,
+        "message": meta.message,
+        "mode": meta.mode,
+        "scope_label": meta.scope_label,
+        "candidates_considered": meta.candidates_considered,
+        "audited_competitors": meta.audited_competitors,
+        "notes": meta.notes,
+    }
+
+
 @app.get("/jobs/{job_id}/before-after")
 async def get_before_after(job_id: str) -> BeforeAfterResponse:
     """Return before/after comparison computed by the fix agent."""
@@ -532,6 +610,7 @@ async def run_fix_agent_task(job_id: str, approved_fix_ids: list[str], admin_tok
         from app.services.ingestion import fetch_admin_data
 
         fix_items = [FixItem(**f) for f in fix_items_raw]
+        findings_raw = (row.get("report_json") or {}).get("findings", [])
 
         store_url = row["store_url"]
 
@@ -560,14 +639,16 @@ async def run_fix_agent_task(job_id: str, approved_fix_ids: list[str], admin_tok
                 metafields_by_product={},
                 seo_by_product={},
                 inventory_by_variant={},
+                admin_domain=store_domain,
             )
 
+        from app.models.findings import Finding
         initial_state: StoreOptimizationState = {
             "job_id": job_id,
             "store_data": merchant_data,
             "admin_token": admin_token,
             "merchant_intent": merchant_intent,
-            "audit_findings": [],
+            "audit_findings": [Finding(**finding) for finding in findings_raw],
             "fix_plan": fix_items,
             "approved_fix_ids": approved_fix_ids,
             "executed_fixes": [],
@@ -582,8 +663,22 @@ async def run_fix_agent_task(job_id: str, approved_fix_ids: list[str], admin_tok
 
         await run_fix_agent(initial_state)
 
+        # Safety net: if the graph returned without marking the job terminal,
+        # force a failed terminal state so the frontend never polls forever.
+        final_row = await get_job(job_id)
+        if final_row is not None and final_row.get("status") == "executing":
+            await update_job_error(
+                job_id,
+                "Fix execution stopped without producing a terminal result. "
+                "The last run likely hit an internal agent/reporting error.",
+            )
+
     except Exception as exc:
         logger.error("run_fix_agent_task failed for job %s: %s", job_id, exc)
+        try:
+            await update_job_error(job_id, f"Fix execution failed: {_friendly_background_error(exc, 'Fix execution')}")
+        except Exception:
+            logger.exception("run_fix_agent_task: failed to persist execution error for %s", job_id)
 
 
 # ---------------------------------------------------------------------------
@@ -601,6 +696,24 @@ async def run_analysis_pipeline(job_id: str, request: AnalyzeRequest) -> None:
         merchant_data = await fetch_public_data(request.store_url)
         if request.admin_token:
             merchant_data = await fetch_admin_data(request.store_url, request.admin_token)
+        await update_job_store_domain(
+            job_id,
+            getattr(merchant_data, "admin_domain", None) or merchant_data.store_domain,
+        )
+
+        # Free tier: cap scan at 10 products
+        FREE_PRODUCT_LIMIT = 10
+        full_product_count = len(merchant_data.products)
+        scan_limited = not request.admin_token and full_product_count > FREE_PRODUCT_LIMIT
+        if scan_limited:
+            merchant_data.products = sorted(
+                merchant_data.products,
+                key=lambda product: (
+                    -(len(product.variants) or 0),
+                    product.handle or "",
+                    product.id or "",
+                ),
+            )[:FREE_PRODUCT_LIMIT]
 
         # Step 2: auditing
         await update_job_status(job_id, "auditing", "Running 19 checks", 40)
@@ -612,22 +725,10 @@ async def run_analysis_pipeline(job_id: str, request: AnalyzeRequest) -> None:
 
         # Step 3: simulating (perception diff + query match)
         await update_job_status(job_id, "simulating", "Simulating AI perception", 65)
-        from app.services.perception_diff import (
-            compute_store_perception_diff,
-            compute_product_perceptions,
-        )
-        from app.services.query_matcher import run_default_queries
+        from app.services.perception_diff import compute_combined_perception
 
-        perception_diff = await compute_store_perception_diff(
+        perception_diff, product_perceptions = await compute_combined_perception(
             merchant_data, findings, merchant_intent=request.merchant_intent
-        )
-        product_perceptions = await compute_product_perceptions(
-            merchant_data.products, findings, merchant_intent=request.merchant_intent
-        )
-
-        await update_job_status(job_id, "simulating", "Matching AI queries", 75)
-        query_match_results = await run_default_queries(
-            merchant_data, paid_tier=bool(request.admin_token)
         )
 
         await update_job_status(job_id, "simulating", "Simulating MCP responses", 80)
@@ -667,8 +768,18 @@ async def run_analysis_pipeline(job_id: str, request: AnalyzeRequest) -> None:
         }
         llms_txt_preview = generate_llms_txt(merchant_data)[:1500]
 
+        fix_items = []
+        copy_paste_items = []
+        if request.admin_token:
+            await update_job_status(job_id, "simulating", "Planning fixes", 95)
+            from app.agent.nodes import build_copy_paste_items, generate_fix_plan
+            fix_items = generate_fix_plan(findings, merchant_data=merchant_data)
+            copy_paste_items = build_copy_paste_items(fix_items)
+            fix_plan_dict = {"fixes": [dataclasses.asdict(f) for f in fix_items]}
+            await update_job_fix_plan(job_id, fix_plan_dict)
+
         # Step 4: assemble report
-        await update_job_status(job_id, "simulating", "Assembling report", 90)
+        await update_job_status(job_id, "simulating", "Assembling report", 98)
         from app.services.report_builder import assemble_report
 
         report = await assemble_report(
@@ -677,27 +788,21 @@ async def run_analysis_pipeline(job_id: str, request: AnalyzeRequest) -> None:
             perception_diff=perception_diff,
             product_perceptions=product_perceptions,
             mcp_results=mcp_results,
-            query_match_results=query_match_results,
+            query_match_results=[],
             competitor_results=competitor_results,
-            copy_paste_items=[],
+            copy_paste_items=copy_paste_items,
             bot_access=bot_access,
             identifier_audit=identifier_audit,
             golden_record=golden_record,
             trust_signals=trust_signals,
             feed_summaries=feed_summaries,
             llms_txt_preview=llms_txt_preview,
+            scan_limited=scan_limited,
+            full_product_count=full_product_count,
         )
-
-        # Step 5: generate fix plan (paid tier only) and save
-        if request.admin_token:
-            await update_job_status(job_id, "simulating", "Planning fixes", 95)
-            from app.agent.nodes import generate_fix_plan
-            fix_items = generate_fix_plan(findings, merchant_data=merchant_data)
-            fix_plan_dict = {"fixes": [dataclasses.asdict(f) for f in fix_items]}
-            await update_job_fix_plan(job_id, fix_plan_dict)
 
         status = "awaiting_approval" if request.admin_token else "complete"
         await update_job_report(job_id, dataclasses.asdict(report), status=status)
 
     except Exception as exc:
-        await update_job_error(job_id, str(exc))
+        await update_job_error(job_id, _friendly_background_error(exc, "Analysis"))

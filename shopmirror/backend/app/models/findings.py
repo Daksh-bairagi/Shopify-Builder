@@ -136,3 +136,5 @@ class AuditReport:
     ai_visibility: Optional[dict] = None      # Multi-LLM probe results (populated on demand)
     feed_summaries: Optional[dict] = None     # Per-channel feed line counts
     llms_txt_preview: Optional[str] = None    # First N chars of generated llms.txt
+    scan_limited: bool = False             # True when free tier capped scan at 10 products
+    full_product_count: int = 0            # Total products in store before cap

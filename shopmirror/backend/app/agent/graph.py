@@ -122,7 +122,13 @@ async def run_fix_agent(initial_state: StoreOptimizationState) -> dict:
     Returns the final state dict.
     """
     graph = await get_compiled_graph()
-    config = {"configurable": {"thread_id": initial_state["job_id"]}}
+    # LangGraph counts node traversals against recursion_limit. Our fix loop
+    # can legitimately exceed the small default when multiple approved fixes
+    # each pass through planner -> approval_gate -> executor -> verifier.
+    config = {
+        "configurable": {"thread_id": initial_state["job_id"]},
+        "recursion_limit": 100,
+    }
 
     final_state: Optional[dict] = None
     async for chunk in graph.astream(initial_state, config=config):

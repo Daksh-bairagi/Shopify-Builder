@@ -1,91 +1,45 @@
-# ShopMirror — Decision Log
+# ShopMirror - Decision Log
 
-Core technical and product decisions only. Format: **Chose X over Y — reason.**
-
----
-
-## Architecture
-
-- **Internal domain objects use `dataclasses`, not Pydantic `BaseModel`** — domain objects like `MerchantData` and `Finding` carry data, they don't need validation. Pydantic is reserved for LLM structured output and API request/response shapes.
-
-- **LLM calls use `with_structured_output(PydanticModel)` exclusively** — no free-text parsing anywhere. Every LLM call has a typed Pydantic schema; if the model can't fill it, it fails loudly rather than silently returning garbage.
-
-- **Fix backups written to DB before every Shopify write** — rollback is a first-class feature, not an afterthought. Every `shopify_writer.py` function creates a `fix_backups` row before mutating anything.
-
-- **Shopify Admin token is plain string input, no OAuth** — hackathon scope. OAuth adds a full auth flow and redirect handling; merchant pastes their token directly into the UI.
-
-- **FastAPI `BackgroundTasks` for job execution, not Celery** — Celery requires a broker (Redis/RabbitMQ) and worker processes. `BackgroundTasks` runs in-process and is sufficient for a single-server hackathon demo. Known tradeoff: jobs are lost on server restart.
-
-## Data / Storage
-
-- **`update_job_report` atomically sets `status`, `progress_pct`, and `completed_at`** — writing the report and closing the job are one operation. Separate calls risk a job stuck in a non-terminal state if the server crashes between them.
-
-- **Queries return `dict | None`, not dataclasses** — asyncpg `Record` maps directly to dict; API handlers serialise straight to JSON. A dataclass round-trip adds no value.
-
-## Competitor Discovery
-
-- **DDGS (DuckDuckGo) as primary search, SerpAPI as optional upgrade** — DDGS is free, requires no key, and has no per-query cost, keeping the free tier truly $0 to operate. SerpAPI is configured via `SERPAPI_KEY` env var and activates automatically when set. In a production system this maps cleanly to a tiered cost model: free-tier analyses use DDGS, paid-tier analyses (or high-volume deployments) configure SerpAPI for guaranteed SLA and higher rate limits. The abstraction is a single `search_competitors(query)` function in `competitor.py` that checks for `SERPAPI_KEY` and routes accordingly — callers never know the difference.
-
-## LangGraph State Persistence (Deferred to Day 6)
-
-- **LangGraph graph checkpointing deferred — current design is in-memory only** — `BackgroundTasks` runs the graph in-process with no checkpoint saver. If the server restarts between the approval gate interrupt and `POST /execute`, the graph state is lost. This is a known limitation. On Day 6 (LangGraph implementation day) we will wire in LangGraph's `AsyncPostgresSaver` using the existing asyncpg pool — the DB connection is already there, checkpointing is a configuration addition not a structural change. This is the correct production pattern: stateful agent runs should be durable, not held in process memory.
-
-## API Schemas
-
-- **API request/response Pydantic schemas live in `app/schemas.py`, not `app/models/`** — models/ holds internal domain dataclasses with no validation. schemas.py holds FastAPI wire shapes (Pydantic BaseModel) validated on every request/response. File is created empty with all shapes commented — implement on Day 2 before adding any route handlers to main.py.
-
-- **`update_job_report` takes an optional `status` parameter (default `'complete'`)** — free tier always passes complete. Paid tier passes `'awaiting_approval'` after analysis so the job stays open for fix execution. `completed_at` is only stamped when status is `'complete'`.
-
-## Rollback Storage
-
-- **Fix backups stored in `fix_backups` DB table, not Shopify metafields** — the PRD mentions "saved to `shopmirror.backup.[field]` metafield on the Shopify product". This is wrong and was not implemented. DB storage is correct: it's queryable, auditable, doesn't pollute the merchant's Shopify data, and doesn't require an extra write to a metafield namespace we don't own. Rollback reads from `fix_backups` and writes the original value back via Admin GraphQL.
-
-## Audit Findings Accuracy
-
-- **Schema/HTML checks (Con1, Con2, D4) are sampled across 5 pages only** — only the top 5 products by variant count are crawled. Findings from these checks will be reported as "based on X crawled pages" in the finding's `impact_statement`, not extrapolated to the full catalog. This is honest reporting — we checked what we could access without an Admin token.
-
-## Dependencies
-
-- **`langchain>=0.3.0` + `langgraph>=0.2.28`** — `langgraph==0.2.0` predates langchain 0.3's `langchain-core>=0.3` requirement. `langgraph 0.2.28` is the first release with compatible `langchain-core 0.3.x` support.
+A running list of decisions made during the build: "We considered X, chose Y, because Z." This log is extracted from the shipped product and its specs. It intentionally excludes trivial implementation details.
 
 ---
 
-## Strategic Rebuild — Accuracy + Shopify-Native Upgrades
+- **We considered building a generic AI content or SEO tool, but chose an AI representation auditor for Shopify merchants, because the real merchant problem is not generating more copy. It is that AI shopping systems cannot reliably classify, trust, or surface products when the underlying catalog data is weak.**
 
-- **Replaced D1 "CRITICAL — AI cannot see your products" with D1a (MEDIUM) + D1b (CRITICAL)** — Shopify products reach ChatGPT Shopping via Shopify's Catalog API, not web crawling. Blocking GPTBot in robots.txt has no effect on Shopify Catalog visibility. D1a accurately flags web-index AI impact at MEDIUM; D1b is the real CRITICAL check: Shopify Catalog eligibility via taxonomy + required fields.
+- **We considered building for buyers and merchants equally, but chose merchants as the primary user, because merchants own the source data and can act on the fixes. That gave the product a clear loop: audit -> evidence -> fix plan -> verified improvement.**
 
-- **Replaced C1 (product_type string check) with Shopify Standard Taxonomy mapping** — Shopify's 2024 Standard Product Taxonomy is the actual routing layer for Shopify Catalog, Google Shopping, and Meta Catalog. A non-empty product_type string (e.g. "stuff") passes the old check with zero routing value. A taxonomy GID routes products to the correct AI category. Autonomous fix: Gemini classifies → `productUpdate` mutation writes `category` field GID.
+- **We considered claiming direct measurement of "how ChatGPT ranks you," but chose evidence-backed simulation, channel compliance, and query matching instead, because live AI provider outputs are non-deterministic and hard to compare before vs. after. We wanted a demo we could defend, not one that depends on lucky prompts.**
 
-- **Removed D4 (price in raw HTML) and T3 (AggregateRating schema)** — D4 universally passes Shopify Liquid-rendered stores; T3 universally fails default Shopify themes. Checks that don't discriminate provide no signal. Slots reallocated to D1b (Catalog eligibility) and D5 (Markets translation).
+- **We considered treating robots.txt as the main discoverability bottleneck, but chose Shopify Catalog eligibility as the critical path, because major AI shopping exposure for Shopify merchants flows through Shopify's catalog layer, not only through web crawling. That changed D1 from a crawler story into a catalog-readiness story.**
 
-- **T4 fix upgraded from copy-paste to autonomous Script Tags injection** — Shopify's `scriptTagCreate` Admin GraphQL mutation injects JSON-LD schema into every storefront page without any theme modification. Fully reversible via `scriptTagDelete`. `script_tag_id` stored in `fix_backups` table for rollback. This converts the most CRITICAL finding from a finding merchants ignore into a finding the agent autonomously fixes.
+- **We considered using a non-empty `product_type` as the category-quality signal, but chose Shopify Standard Taxonomy mapping as the real routing check, because a free-text product type can be populated and still useless for catalog inclusion or category matching.**
 
-- **AsyncPostgresSaver wired same day as LangGraph graph** — The approval gate interrupt requires persistent graph state. Without `AsyncPostgresSaver`, the paused graph lives in process memory and silently breaks under multi-worker deployment. No longer deferred; both are Day 6.
+- **We considered keeping checks like raw-HTML price presence and AggregateRating schema, but removed them, because one almost always passed and the other almost always failed on normal Shopify stores. We cut them because a check that does not discriminate creates noise, not insight.**
 
-- **Added AI Readiness Score (0–100) as headline metric** — Weighted composite across 5 pillars (Discoverability 20%, Completeness 30%, Consistency 20%, Trust_Policies 15%, Transaction 15%). Every credible SaaS tool has a single headline score merchants can track. This is the demo's primary emotional anchor.
+- **We considered extrapolating public-store findings to the whole store, but chose explicit scan limits and sample-bound wording, because without Admin access we only truly know what we crawled. The free tier now caps to 10 products in a deterministic order and sampled HTML/schema checks are reported as sampled evidence, not full-catalog truth.**
 
-- **Added Multi-Channel Compliance Dashboard** — Maps existing checks to 5 channels: Shopify Catalog, Google Shopping, Meta Catalog, Perplexity Web, ChatGPT Shopping. Each shows READY/PARTIAL/BLOCKED. No competitor tool provides this single view at this price point.
+- **We considered letting the LLM drive more of the audit, but chose deterministic code for scoring, eligibility, channel status, query matching, fix routing, and verification, because those paths affect correctness and must be reproducible. We use the model only where language interpretation genuinely adds value.**
 
-- **Added AI Query Match Simulator** — Closes the evidence-of-impact gap. One LLM call parses the query into structured attributes; deterministic matching loop runs against machine-readable product fields. Shows merchants exactly how many of their products would match an AI shopping query, before and after fixes. No unverifiable claims about real ChatGPT results.
+- **We considered free-text LLM responses, but chose structured outputs with schema validation only, because malformed model output should fail loudly instead of silently polluting the report or fix plan.**
 
-- **Added AI Readiness Certificate** — PNG-exportable before/after summary generated after agent run. Retention mechanism + viral distribution channel for merchant communities.
+- **We considered keeping LLMs in the query simulator and MCP-style Q&A path, but replaced those with regex and rule-based logic where inputs were predictable, because using a model for deterministic extraction added cost and hallucination risk without improving quality.**
 
-## Day 6 Implementation
+- **We considered a broad "auto-fix everything" story, but chose a narrower "fix only what we can write back and verify" boundary, because credibility mattered more than feature count. This is why some findings stay manual or copy-paste even when an LLM could generate plausible text for them.**
 
-- **Admin token not stored in DB; fix agent runs in dry-run mode when token unavailable** — storing plaintext admin tokens in PostgreSQL is a security risk. For the hackathon, the POST /execute route re-runs the agent without live writes when the token isn't available from the DB row. Production fix: store an encrypted token in a short-TTL session cache (Redis). The dry-run path still exercises the full LangGraph state machine and reports what would have been written.
+- **We considered presenting schema and policy fixes as autonomous writes, but chose generated copy-paste outputs for those cases, because the current write surface cannot safely and honestly mutate every storefront concern. We would rather surface real deliverables than pretend unsupported automation happened.**
 
-- **Approval gate implemented as pass-through, not LangGraph interrupt** — the `/execute` request already carries `approved_fix_ids`, so the graph doesn't need to interrupt and wait. The `approval_gate_node` exists structurally (matching the spec) but doesn't call `interrupt()`. Production multi-turn approval would add the interrupt; for the demo the approval step is handled in the frontend before calling `/execute`.
+- **We considered trusting tool success as proof that a fix worked, but chose live verification against Shopify state, because a successful function return is not the same as a successful merchant-facing mutation. Titles, taxonomy, metafields, alt text, and definitions are checked against Shopify after execution.**
 
-- **fix plan generation runs in analysis pipeline (not agent planner_node)** — the spec says planner_node generates the fix plan on first agent run. For the UI flow (GET /fix-plan before any agent invocation), the plan must be in the DB first. Generating it at the end of the analysis pipeline achieves both: the endpoint works immediately, and the planner_node reads the same plan from state.
+- **We considered inferring before/after results from which fixes ran, but chose post-fix re-audit, because judges should be able to ask "what actually changed?" and get an answer grounded in refreshed store data rather than assumptions.**
 
-## Day 3 Implementation
+- **We considered one-way mutations, but chose backup-first writes plus rollback, because an agent that edits merchant catalog data without recovery is not trustworthy. That decision shaped the writer, verifier, and UI all at once.**
 
-- **`perception_diff.py` uses one batch LLM call for all products, not two calls per product** — spec originally described 2 LLM calls per product (`get_product_perception`). Replaced with a single `BatchProductPerceptionOutput` call across up to 10 products. Fewer LLM calls, lower latency, same analytical quality — correct tradeoff for a hackathon demo with live API costs.
+- **We considered using the storefront URL as the Admin API target, but chose canonical Admin-domain resolution first, because custom-domain stores can look valid publicly while failing silently on Admin GraphQL. The system now tries to discover and verify the real Shopify Admin domain before paid-tier reads or writes.**
 
-- **`llm_analysis.py` LLM instantiation is lazy (first call), not module-level** — `ChatVertexAI(model="gemini-2.0-flash", temperature=0)` deferred to first invocation. Prevents import-time crash in CI or local dev environments without Vertex AI credentials configured.
+- **We considered Shopify OAuth for the hackathon build, but chose pasted Admin tokens, because OAuth would consume a large amount of build time without improving the core audit and remediation logic being judged. We accepted the tradeoff and explicitly kept tokens out of persistent storage.**
 
-## Day 7 Implementation
+- **We considered storing Admin tokens to make delayed execution easier, but chose not to persist them, because merchant credential handling mattered more than convenience. That decision forced the execute path, asset download flow, and re-ingestion logic to work with request-supplied tokens only.**
 
-- **Computed before-after in reporter_node rather than re-ingesting on GET /before-after** — admin token is never stored in DB; re-running heuristics with executed_fixes as ground truth gives the same result without a Shopify round-trip.
+- **We considered a more production-like worker architecture and multi-turn backend approval flow, but chose a simpler FastAPI background-task model with frontend approval followed by a single execute call, because it let us ship the end-to-end product loop within the hackathon window. We accepted the tradeoff that in-flight jobs are less durable than a full queue-backed system.**
 
-- **Stored schema snippet and policy draft text in FixResult.shopify_gid field** — avoids adding a new state field; gid is unused for copy-paste fix types and is already a string column.
+- **We considered showing only a large findings table, but chose a headline AI Readiness Score, channel-specific compliance states, competitor benchmarking, query matching, and a before/after certificate, because both merchants and judges need an immediate answer to "how bad is it, why does it matter, and did the fixes improve it?"**

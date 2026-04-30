@@ -61,7 +61,7 @@ export default function LandingPage({ onGetStarted }: Props) {
       </header>
 
       {/* ── Hero ────────────────────────────────────────────────────── */}
-      <section style={{ position: 'relative', minHeight: '92vh' }}>
+      <section style={{ position: 'relative', minHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
         {/* grid bg texture */}
         <div style={{
           position: 'absolute', inset: 0, opacity: 0.35, pointerEvents: 'none',
@@ -69,10 +69,10 @@ export default function LandingPage({ onGetStarted }: Props) {
           backgroundSize: '80px 80px',
         }} />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', minHeight: '92vh', position: 'relative' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', flex: 1, minHeight: '72vh', position: 'relative', overflow: 'hidden' }}>
 
           {/* LEFT — You */}
-          <div style={{ padding: '120px 64px 80px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <div style={{ padding: '80px 64px 60px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div className="eyebrow" style={{ marginBottom: 28 }}>You — the merchant</div>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(52px,7vw,120px)', lineHeight: 0.92, letterSpacing: '-0.025em', fontWeight: 400, margin: 0, color: 'var(--m-fg)' }}>
               You sell<br />
@@ -86,7 +86,7 @@ export default function LandingPage({ onGetStarted }: Props) {
 
           {/* RIGHT — Mirror */}
           <div style={{
-            padding: '120px 64px 80px',
+            padding: '80px 64px 60px',
             background: 'var(--paper)',
             color: 'var(--paper-ink)',
             display: 'flex', flexDirection: 'column', justifyContent: 'center',
@@ -94,6 +94,7 @@ export default function LandingPage({ onGetStarted }: Props) {
             transform: `skewX(${(mouseX - 0.5) * -0.3}deg)`,
             transformOrigin: 'left center',
             transition: 'transform 600ms ease',
+            overflow: 'hidden',
           }}>
             <div className="eyebrow-paper" style={{ marginBottom: 28 }}>The mirror — what AI sees</div>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(52px,7vw,120px)', lineHeight: 0.92, letterSpacing: '-0.025em', fontWeight: 400, margin: 0, color: 'var(--paper-ink)', fontStyle: 'italic', opacity: 0.88 }}>
@@ -110,8 +111,8 @@ export default function LandingPage({ onGetStarted }: Props) {
           <div className="seam-line" />
         </div>
 
-        {/* CTA strip */}
-        <div style={{ position: 'absolute', bottom: 56, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, zIndex: 10 }}>
+        {/* CTA strip — normal flow so it never overlaps panel content */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, padding: '40px 32px 48px', position: 'relative', zIndex: 10 }}>
           <div style={{
             display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 100,
             border: '1px solid var(--ink-line)', fontFamily: 'var(--font-geist-mono)', fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--m-fg-2)',

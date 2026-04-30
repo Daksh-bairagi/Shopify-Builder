@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 import httpx
 
 from app.models.merchant import MerchantData
+from dataclasses import dataclass, field
+
 from app.models.findings import Finding, CompetitorAudit, CompetitorResult
 from app.utils.validators import detect_shopify
 from app.utils.retry import async_retry
@@ -28,6 +30,26 @@ _BLOCKLIST: set[str] = {
 
 # Bots whose blocking in robots.txt is a negative signal (D1a check)
 _AI_BOTS = {"GPTBot", "PerplexityBot"}
+
+PUBLIC_SCOPE_LABEL = "Public-data benchmark across D1a, C1, C3, C4, C6, T1, and T2 on up to 5 products per competitor."
+
+
+@dataclass
+class CompetitorDiscoveryOutcome:
+    urls: list[str]
+    status: str
+    message: str
+
+
+@dataclass
+class CompetitorAnalysisMeta:
+    status: str
+    message: str
+    mode: str
+    scope_label: str = PUBLIC_SCOPE_LABEL
+    candidates_considered: int = 0
+    audited_competitors: int = 0
+    notes: list[str] = field(default_factory=list)
 
 
 def _extract_domain(url: str) -> str | None:
@@ -52,11 +74,10 @@ async def find_competitors(
     store_name: str,
     product_types: list[str],
     max_results: int = 5,
-) -> list[str]:
+) -> CompetitorDiscoveryOutcome:
     """Discover competitor Shopify stores via DuckDuckGo or SerpAPI.
 
-    Returns a list of base URLs (with https://) for confirmed Shopify stores,
-    capped at *max_results*. Returns [] on any failure.
+    Returns confirmed Shopify store URLs plus status metadata.
     """
     try:
         primary = product_types[0] if product_types else store_name
@@ -84,7 +105,11 @@ async def find_competitors(
                 seen_domains[domain] = url
 
         if not seen_domains:
-            return []
+            return CompetitorDiscoveryOutcome(
+                urls=[],
+                status="no_candidates",
+                message="Public search did not return comparable Shopify storefront candidates.",
+            )
 
         # Validate candidates in parallel
         domains = list(seen_domains.keys())
@@ -100,10 +125,25 @@ async def find_competitors(
             if len(confirmed) >= max_results:
                 break
 
-        return confirmed
+        if not confirmed:
+            return CompetitorDiscoveryOutcome(
+                urls=[],
+                status="no_shopify_matches",
+                message="Candidates were found, but none could be verified as reachable Shopify storefronts.",
+            )
+
+        return CompetitorDiscoveryOutcome(
+            urls=confirmed,
+            status="ok",
+            message=f"Benchmarked {len(confirmed)} comparable Shopify storefronts using public data only.",
+        )
 
     except Exception:
-        return []
+        return CompetitorDiscoveryOutcome(
+            urls=[],
+            status="search_failed",
+            message="Competitor discovery could not complete because public search or storefront validation failed.",
+        )
 
 
 async def _search_duckduckgo(query: str) -> list[str]:
@@ -140,9 +180,9 @@ async def _search_serpapi(query: str, api_key: str) -> list[str]:
 
 @async_retry
 async def _fetch_products_json(base_url: str) -> list[dict]:
-    """Fetch up to 10 products from a competitor's public products.json."""
+    """Fetch up to 5 products from a competitor's public products.json."""
     async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(f"{base_url}/products.json", params={"limit": 10})
+        resp = await client.get(f"{base_url}/products.json", params={"limit": 5})
         resp.raise_for_status()
         return resp.json().get("products", [])
 
@@ -299,11 +339,26 @@ async def run_competitor_analysis(
     merchant_findings: list[Finding],
     competitor_urls: list[str] | None = None,
 ) -> list[CompetitorResult]:
+    results, _ = await run_competitor_analysis_with_meta(
+        merchant_data=merchant_data,
+        merchant_findings=merchant_findings,
+        competitor_urls=competitor_urls,
+    )
+    return results
+
+
+async def run_competitor_analysis_with_meta(
+    merchant_data: MerchantData,
+    merchant_findings: list[Finding],
+    competitor_urls: list[str] | None = None,
+) -> tuple[list[CompetitorResult], CompetitorAnalysisMeta]:
     """Main entry point for competitor analysis.
 
     Discovers or validates competitor stores, audits up to 3 in parallel,
     and returns results sorted by number of gaps (most impactful first).
     """
+    mode = "manual" if competitor_urls else "auto"
+    notes = [PUBLIC_SCOPE_LABEL]
     if competitor_urls:
         # Caller-supplied URLs — still validate they are Shopify stores
         validation_results: list[bool] = await asyncio.gather(
@@ -318,15 +373,35 @@ async def run_competitor_analysis(
             for url, is_shopify in zip(competitor_urls, validation_results)
             if is_shopify
         ]
+        if not candidates:
+            return [], CompetitorAnalysisMeta(
+                status="invalid_manual_urls",
+                message="None of the provided URLs could be confirmed as reachable Shopify storefronts.",
+                mode=mode,
+                candidates_considered=len(competitor_urls),
+                audited_competitors=0,
+                notes=notes,
+            )
     else:
+        # No competitor URLs provided — auto-discover via SerpAPI (or DuckDuckGo fallback)
         product_types = list(
             {p.product_type for p in merchant_data.products if p.product_type}
         )
-        candidates = await find_competitors(
+        discovery = await find_competitors(
             store_domain=merchant_data.store_domain,
             store_name=merchant_data.store_name,
             product_types=product_types,
         )
+        candidates = discovery.urls
+        if not candidates:
+            return [], CompetitorAnalysisMeta(
+                status=discovery.status,
+                message=discovery.message,
+                mode=mode,
+                candidates_considered=0,
+                audited_competitors=0,
+                notes=notes,
+            )
 
     # Audit up to 3 competitors in parallel
     audit_targets = candidates[:3]
@@ -340,4 +415,21 @@ async def run_competitor_analysis(
     # Sort by number of gaps descending — most impactful comparison first
     results.sort(key=lambda r: len(r.gaps), reverse=True)
 
-    return results
+    if not results:
+        return [], CompetitorAnalysisMeta(
+            status="audit_failed",
+            message="Comparable storefronts were identified, but their public product or policy data could not be audited reliably.",
+            mode=mode,
+            candidates_considered=len(candidates),
+            audited_competitors=0,
+            notes=notes,
+        )
+
+    return results, CompetitorAnalysisMeta(
+        status="ok",
+        message=f"Benchmarked {len(results)} comparable Shopify storefronts using public data only.",
+        mode=mode,
+        candidates_considered=len(candidates),
+        audited_competitors=len(results),
+        notes=notes,
+    )

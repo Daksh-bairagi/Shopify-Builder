@@ -16,7 +16,12 @@ from typing import Optional
 
 import httpx
 
-from app.db.queries import save_fix_backup, get_fix_backup, mark_fix_rolled_back
+from app.db.queries import (
+    save_fix_backup,
+    get_fix_backup,
+    list_fix_backups_for_prefix,
+    mark_fix_rolled_back,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +76,91 @@ mutation ProductUpdate($input: ProductInput!) {
   }
 }
 """
+
+_QUERY_PRODUCT_SNAPSHOT = """
+query ProductSnapshot($id: ID!) {
+  product(id: $id) {
+    id
+    title
+    category {
+      id
+    }
+    metafields(first: 50) {
+      edges {
+        node { namespace key value type }
+      }
+    }
+  }
+}
+"""
+
+_QUERY_FILE_ALT = """
+query FileAlt($id: ID!) {
+  node(id: $id) {
+    ... on MediaImage {
+      id
+      image { altText }
+    }
+  }
+}
+"""
+
+_QUERY_METAFIELD_DEFINITIONS = """
+query MetafieldDefinitions {
+  metafieldDefinitions(first: 100, ownerType: PRODUCT) {
+    edges {
+      node { namespace key }
+    }
+  }
+}
+"""
+
+
+def _encode_metafield_backup(
+    original_value: Optional[str],
+    existed_before: bool,
+    original_type: Optional[str],
+) -> str:
+    return json.dumps(
+        {
+            "kind": "metafield_backup",
+            "existed_before": existed_before,
+            "value": original_value,
+            "type": original_type,
+        }
+    )
+
+
+def _decode_metafield_backup(raw: Optional[str]) -> tuple[bool, Optional[str], Optional[str]]:
+    if not raw:
+        return False, None, None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return True, raw, None
+    if isinstance(parsed, dict) and parsed.get("kind") == "metafield_backup":
+        return (
+            bool(parsed.get("existed_before")),
+            parsed.get("value"),
+            parsed.get("type"),
+        )
+    return True, raw, None
+
+
+async def _get_product_metafield_snapshot(
+    store_domain: str,
+    token: str,
+    product_gid: str,
+) -> dict[tuple[str, str], tuple[Optional[str], Optional[str]]]:
+    body = await _admin_graphql(store_domain, token, _QUERY_PRODUCT_SNAPSHOT, {"id": product_gid})
+    edges = ((body.get("data", {}) or {}).get("product") or {}).get("metafields", {}).get("edges", [])
+    return {
+        (edge["node"].get("namespace"), edge["node"].get("key")): (
+            edge["node"].get("value"),
+            edge["node"].get("type"),
+        )
+        for edge in edges
+    }
 
 
 async def _product_update(store_domain: str, token: str, product_gid: str, fields: dict) -> str:
@@ -163,12 +253,13 @@ async def write_taxonomy(
         new_value=taxonomy_gid,
         shopify_gid=product_gid,
     )
-    # Shopify Standard Taxonomy uses productCategory.productTaxonomyNode.id via productUpdate
+    # Shopify ProductInput expects `category: ID`, where the ID is a
+    # `gid://shopify/TaxonomyCategory/...` value.
     mutation = """
     mutation SetTaxonomy($productId: ID!, $taxonomyNodeId: ID!) {
       productUpdate(input: {
         id: $productId,
-        productCategory: { productTaxonomyNodeId: $taxonomyNodeId }
+        category: $taxonomyNodeId
       }) {
         product { id }
         userErrors { field message }
@@ -211,13 +302,16 @@ async def write_metafield(
     fix_id: str,
 ) -> str:
     product_id = product_gid.rsplit("/", 1)[-1]
+    existing_metafields = await _get_product_metafield_snapshot(store_domain, token, product_gid)
+    current_value, current_type = existing_metafields.get((namespace, key), (None, None))
+    existed_before = (namespace, key) in existing_metafields
     await save_fix_backup(
         job_id=job_id,
         fix_id=fix_id,
         product_id=product_id,
         field_type="metafield",
         field_key=f"{namespace}.{key}",
-        original_value=None,
+        original_value=_encode_metafield_backup(current_value, existed_before, current_type),
         new_value=value,
         shopify_gid=product_gid,
     )
@@ -421,19 +515,47 @@ async def create_metafield_definition(
 # rollback_fix — restore original value from fix_backups
 # ---------------------------------------------------------------------------
 
-async def rollback_fix(fix_id: str, store_domain: str, token: str) -> tuple[str, str]:
+async def rollback_fix(
+    fix_id: str,
+    store_domain: str,
+    token: str,
+    expected_job_id: str | None = None,
+) -> tuple[str, str]:
     """Restore the original value for a fix. Returns (field, restored_value).
 
     Raises KeyError if fix_id not found. Raises RuntimeError on write failure.
     """
     backup = await get_fix_backup(fix_id)
-    if backup is None:
+    backups: list[dict] = []
+    if backup is not None:
+        backups = [backup]
+    else:
+        backups = await list_fix_backups_for_prefix(f"{fix_id}_")
+    if expected_job_id is not None:
+        backups = [row for row in backups if row.get("job_id") == expected_job_id]
+    if not backups:
         raise KeyError(f"No backup found for fix_id={fix_id!r}")
+
+    restored_fields: list[str] = []
+    restored_values: list[str] = []
+    for backup_row in reversed(backups):
+        field, restored_value = await _rollback_single_backup(backup_row, store_domain, token)
+        restored_fields.append(field)
+        restored_values.append(restored_value)
+        await mark_fix_rolled_back(backup_row["fix_id"])
+
+    if len(restored_fields) == 1:
+        return restored_fields[0], restored_values[0]
+    return ("multiple_fields", f"Rolled back {len(restored_fields)} writes")
+
+
+async def _rollback_single_backup(backup: dict, store_domain: str, token: str) -> tuple[str, str]:
 
     field_type = backup["field_type"]
     shopify_gid = backup["shopify_gid"]
     original_value = backup["original_value"]
     script_tag_id = backup.get("script_tag_id")
+    restored_value = original_value or ""
 
     if field_type == "title":
         await _product_update(store_domain, token, shopify_gid, {"title": original_value or ""})
@@ -461,19 +583,39 @@ async def rollback_fix(fix_id: str, store_domain: str, token: str) -> tuple[str,
         # If original was null, leave taxonomy as-is (cannot "unset" to null safely)
 
     elif field_type == "metafield":
-        # Delete the metafield to restore "null" state
         namespace, key = (backup.get("field_key") or ".").split(".", 1)
-        mutation = """
-        mutation MetafieldsDelete($metafields: [MetafieldIdentifierInput!]!) {
-          metafieldsDelete(metafields: $metafields) {
-            deletedMetafields { key namespace ownerId }
-            userErrors { field message }
-          }
-        }
-        """
-        await _admin_graphql(store_domain, token, mutation, {
-            "metafields": [{"ownerId": shopify_gid, "namespace": namespace, "key": key}]
-        })
+        existed_before, metafield_value, metafield_type = _decode_metafield_backup(original_value)
+        restored_value = metafield_value or ""
+        if existed_before:
+            mutation = """
+            mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
+              metafieldsSet(metafields: $metafields) {
+                metafields { id key namespace value }
+                userErrors { field message }
+              }
+            }
+            """
+            await _admin_graphql(store_domain, token, mutation, {
+                "metafields": [{
+                    "ownerId": shopify_gid,
+                    "namespace": namespace,
+                    "key": key,
+                    "value": metafield_value or "",
+                    "type": metafield_type or "single_line_text_field",
+                }]
+            })
+        else:
+            mutation = """
+            mutation MetafieldsDelete($metafields: [MetafieldIdentifierInput!]!) {
+              metafieldsDelete(metafields: $metafields) {
+                deletedMetafields { key namespace ownerId }
+                userErrors { field message }
+              }
+            }
+            """
+            await _admin_graphql(store_domain, token, mutation, {
+                "metafields": [{"ownerId": shopify_gid, "namespace": namespace, "key": key}]
+            })
 
     elif field_type == "image_alt":
         await _admin_graphql(store_domain, token, _MUTATION_FILE_UPDATE, {
@@ -486,6 +628,123 @@ async def rollback_fix(fix_id: str, store_domain: str, token: str) -> tuple[str,
 
     else:
         raise RuntimeError(f"Unknown field_type for rollback: {field_type!r}")
+    return (backup.get("field_key") or field_type), restored_value
 
-    await mark_fix_rolled_back(fix_id)
-    return (backup.get("field_key") or field_type), (original_value or "")
+
+async def verify_fix_applied(
+    store_domain: str,
+    token: str,
+    fix_id: str,
+    fix_type: str,
+) -> bool:
+    """Verify a completed fix against live Shopify state when possible."""
+    if fix_type == "create_metafield_definitions":
+        body = await _admin_graphql(store_domain, token, _QUERY_METAFIELD_DEFINITIONS)
+        defs = (body.get("data", {}).get("metafieldDefinitions", {}) or {}).get("edges", [])
+        existing = {
+            (edge["node"].get("namespace"), edge["node"].get("key"))
+            for edge in defs
+        }
+        required = {
+            ("custom", "material"),
+            ("custom", "care_instructions"),
+        }
+        return required.issubset(existing)
+
+    if fix_type == "fill_metafield":
+        backups = await list_fix_backups_for_prefix(f"{fix_id}_")
+        if not backups:
+            return False
+        product_gid = backups[0].get("shopify_gid")
+        if not product_gid:
+            return False
+        live = {
+            key: value
+            for key, (value, _) in (await _get_product_metafield_snapshot(store_domain, token, product_gid)).items()
+        }
+        for backup in backups:
+            field_key = backup.get("field_key") or ""
+            if "." not in field_key:
+                return False
+            namespace, key = field_key.split(".", 1)
+            if live.get((namespace, key)) != (backup.get("new_value") or ""):
+                return False
+        return True
+
+    backup = await get_fix_backup(fix_id)
+
+    if fix_type == "generate_alt_text":
+        backups = await list_fix_backups_for_prefix(f"{fix_id}_")
+        if not backups:
+            backups = [backup] if backup is not None else []
+        if not backups:
+            return False
+        for image_backup in backups:
+            image_gid = image_backup.get("shopify_gid")
+            if not image_gid:
+                return False
+            body = await _admin_graphql(store_domain, token, _QUERY_FILE_ALT, {"id": image_gid})
+            node = (body.get("data", {}) or {}).get("node") or {}
+            image = node.get("image") or {}
+            if (image.get("altText") or "") != (image_backup.get("new_value") or ""):
+                return False
+        return True
+
+    if backup is None:
+        return False
+
+    shopify_gid = backup.get("shopify_gid")
+    expected = backup.get("new_value") or ""
+    if not shopify_gid:
+        return False
+
+    if fix_type in {"improve_title", "map_taxonomy", "classify_product_type"}:
+        body = await _admin_graphql(store_domain, token, _QUERY_PRODUCT_SNAPSHOT, {"id": shopify_gid})
+        product = (body.get("data", {}) or {}).get("product") or {}
+        if fix_type == "improve_title":
+            return (product.get("title") or "") == expected
+        if fix_type == "classify_product_type":
+            return (product.get("productType") or "") == expected
+        taxonomy = (product.get("category") or {}).get("id") or ""
+        return taxonomy == expected
+
+    return False
+
+
+# ---------------------------------------------------------------------------
+# validate_taxonomy_gid — confirm a GID refers to a real Shopify taxonomy node
+# ---------------------------------------------------------------------------
+
+_QUERY_TAXONOMY_NODE = """
+query TaxonomyNode($id: ID!) {
+  node(id: $id) {
+    ... on TaxonomyCategory {
+      id
+      fullName
+    }
+  }
+}
+"""
+
+
+async def validate_taxonomy_gid(
+    store_domain: str,
+    token: str,
+    taxonomy_gid: str,
+) -> bool:
+    """Query Shopify Admin API to confirm the taxonomy GID exists.
+
+    Returns False only when the API definitively says the node doesn't exist
+    (null response). On any network/API error the function fails open — the
+    calling tool should then let write_taxonomy's own userErrors catch bad IDs.
+    """
+    try:
+        body = await _admin_graphql(store_domain, token, _QUERY_TAXONOMY_NODE, {"id": taxonomy_gid})
+        node = (body.get("data", {}) or {}).get("node")
+        return node is not None
+    except Exception as exc:
+        logger.warning(
+            "validate_taxonomy_gid: could not verify %s against Shopify API, proceeding: %s",
+            taxonomy_gid, exc,
+        )
+        return True  # fail open — let write_taxonomy's userErrors handle genuinely bad IDs

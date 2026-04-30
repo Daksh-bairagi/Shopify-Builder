@@ -3,7 +3,7 @@ query_matcher.py — AI Query Match Simulator
 
 Answers: "would my products actually appear if someone asked AI for them?"
 Deterministic attribute matching from machine-readable product fields.
-One LLM call to parse the query; zero LLM calls in the matching loop.
+Zero LLM calls — query parsed with regex; matching is deterministic.
 """
 from __future__ import annotations
 
@@ -33,34 +33,55 @@ class ParsedQuery(BaseModel):
 # Public API
 # ---------------------------------------------------------------------------
 
-async def parse_query_attributes(query_text: str) -> ParsedQuery:
+def parse_query_attributes(query_text: str) -> ParsedQuery:
     """
-    One LLM call (Gemini) to extract structured attributes from a natural
-    language shopping query.
+    Extract structured shopping attributes from a natural language query
+    using pure regex — no LLM call required.
 
-    Args:
-        query_text: e.g. "machine washable yoga mat under $50, eco-friendly"
-
-    Returns:
-        ParsedQuery with category, price bounds, and attribute list.
+    Handles patterns like:
+        "yoga mat under $50"
+        "best cotton shirt with fast shipping"
+        "premium quality sneakers"
     """
-    # Import here to avoid circular imports at module level
-    import os
-    from langchain_google_genai import ChatGoogleGenerativeAI
+    import re
 
-    llm = ChatGoogleGenerativeAI(
-        model=os.environ.get("VERTEX_MODEL", "gemini-2.5-flash"),
-        temperature=0,
-        google_api_key=os.environ.get("GEMINI_API_KEY"),
-    )
-    structured = llm.with_structured_output(ParsedQuery)
+    text = query_text.strip()
 
-    prompt = (
-        "Extract structured shopping attributes from this query. "
-        "Return ONLY valid JSON matching the ParsedQuery schema.\n\n"
-        f"Query: {query_text}"
+    # --- Price extraction ---
+    price_max: float | None = None
+    price_min: float | None = None
+    max_match = re.search(r'(?:under|below|max|up to)\s+\$?([\d]+(?:\.\d+)?)', text, re.IGNORECASE)
+    if max_match:
+        price_max = float(max_match.group(1))
+    min_match = re.search(r'(?:over|above|at least|from)\s+\$?([\d]+(?:\.\d+)?)', text, re.IGNORECASE)
+    if min_match:
+        price_min = float(min_match.group(1))
+
+    # --- Strip price phrases and punctuation for token extraction ---
+    cleaned = re.sub(r'(?:under|below|over|above|up to|at least|from|max)\s+\$?[\d]+(?:\.\d+)?', ' ', text, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\$[\d]+(?:\.\d+)?', ' ', cleaned)
+    cleaned = re.sub(r'[^a-zA-Z0-9\s-]', ' ', cleaned)
+
+    STOP_WORDS = {
+        'a', 'an', 'the', 'with', 'and', 'or', 'for', 'in', 'of',
+        'is', 'are', 'do', 'me', 'my', 'its', 'this', 'that',
+        'best', 'good', 'great', 'nice', 'idea', 'gift', 'reviews',
+        'review', 'quality', 'affordable', 'cheap', 'fast', 'quick',
+        'shipping', 'delivery', 'price', 'buy', 'shop',
+    }
+
+    tokens = [t.lower().strip() for t in cleaned.split() if t.strip()]
+    meaningful = [t for t in tokens if t not in STOP_WORDS and len(t) > 2]
+
+    category = meaningful[0] if meaningful else None
+    attributes = meaningful[1:6] if len(meaningful) > 1 else []
+
+    return ParsedQuery(
+        category=category,
+        price_max=price_max,
+        price_min=price_min,
+        attributes=attributes,
     )
-    return await structured.ainvoke(prompt)
 
 
 def match_products(
@@ -203,7 +224,7 @@ async def run_default_queries(merchant_data: MerchantData, paid_tier: bool = Fal
     results = []
     for query_text in queries_to_run:
         try:
-            parsed = await parse_query_attributes(query_text)
+            parsed = parse_query_attributes(query_text)
             matched_ids, failing = match_products(
                 products=merchant_data.products,
                 attributes=parsed,

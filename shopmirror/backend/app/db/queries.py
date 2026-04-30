@@ -56,6 +56,19 @@ async def update_job_status(
     )
 
 
+async def update_job_store_domain(job_id: str, store_domain: str | None) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        """
+        UPDATE analysis_jobs
+        SET store_domain = $2
+        WHERE id = $1::uuid
+        """,
+        job_id,
+        store_domain,
+    )
+
+
 async def update_job_report(
     job_id: str,
     report_json: dict,
@@ -203,6 +216,23 @@ async def get_fix_backup(fix_id: str) -> dict[str, Any] | None:
     if row is None:
         return None
     return dict(row)
+
+
+async def list_fix_backups_for_prefix(fix_id_prefix: str) -> list[dict[str, Any]]:
+    """Return all backup rows whose fix_id starts with the given prefix."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT id::text, job_id::text, fix_id, product_id, field_type,
+               field_key, original_value, new_value, shopify_gid,
+               script_tag_id, applied_at, rolled_back
+        FROM fix_backups
+        WHERE fix_id LIKE $1
+        ORDER BY applied_at ASC
+        """,
+        f"{fix_id_prefix}%",
+    )
+    return [dict(row) for row in rows]
 
 
 async def mark_fix_rolled_back(fix_id: str) -> None:

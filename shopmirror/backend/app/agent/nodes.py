@@ -12,7 +12,9 @@ Nodes:
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
+import re
 import uuid
 from typing import Literal
 
@@ -48,25 +50,143 @@ CHECK_TO_FIX_TYPE: dict[str, str] = {
     "D1b": "map_taxonomy",           # Missing Shopify Standard Taxonomy GID → map_taxonomy
     "C1":  "map_taxonomy",           # Taxonomy/product_type structural gap → map_taxonomy
     "C2":  "improve_title",          # Title missing category noun → improve_title
-    "C3":  "fill_metafield",         # Missing structured attributes → fill_metafield
-    "C4":  "fill_metafield",         # Missing GTIN/barcode → fill_metafield
-    "C5":  "fill_metafield",         # Missing specifications → fill_metafield
-    "C6":  "fill_metafield",         # Missing material → fill_metafield
-    "Con1": "generate_schema_snippet",  # Missing/inconsistent schema markup -> copy-paste snippet
-    "Con2": "fill_metafield",        # Metafield inconsistency → fill_metafield
-    "Con3": "fill_metafield",        # SEO field inconsistency (Mode B) → fill_metafield
+    "C3":  "rename_variant_options",
+    "C4":  "supply_identifiers",
+    "C5":  "create_metafield_definitions",
+    "C6":  "generate_alt_text",
+    "Con1": "generate_schema_snippet",
+    "Con2": "repair_availability_schema",
+    "Con3": "align_seo_metadata",
     "T1":  "suggest_policy_fix",     # No refund policy
     "T2":  "suggest_policy_fix",     # No shipping policy
-    "T4":  "generate_schema_snippet", # Missing JSON-LD schema markup -> copy-paste snippet
+    "T4":  "generate_schema_snippet",
 }
 
 # Store-level fix types get a single fix item regardless of affected product count
 STORE_LEVEL_TYPES = {
-    "inject_schema_script",
     "generate_schema_snippet",
     "create_metafield_definitions",
     "suggest_policy_fix",
 }
+
+
+def _extract_shipping_country_codes(shipping_text: str) -> list[str]:
+    text = (shipping_text or "").lower()
+    codes: list[str] = []
+    mapping = [
+        ("united states", "US"),
+        ("usa", "US"),
+        ("canada", "CA"),
+        ("united kingdom", "GB"),
+        ("uk", "GB"),
+        ("australia", "AU"),
+        ("europe", "EU"),
+        ("international", "INTL"),
+        ("worldwide", "INTL"),
+    ]
+    for needle, code in mapping:
+        if needle in text and code not in codes:
+            codes.append(code)
+    return codes or ["US"]
+
+
+def _build_schema_snippet_content(merchant_data) -> str:
+    refund_text = getattr(getattr(merchant_data, "policies", None), "refund", "") or ""
+    shipping_text = getattr(getattr(merchant_data, "policies", None), "shipping", "") or ""
+    return_days = 30
+    match = re.search(
+        r"(\d+)\s*(?:day|days|business\s+day|business\s+days)",
+        refund_text,
+        re.IGNORECASE,
+    )
+    if match:
+        return_days = int(match.group(1))
+
+    shipping_destinations = [
+        {"@type": "DefinedRegion", "addressCountry": code}
+        for code in _extract_shipping_country_codes(shipping_text)
+    ]
+
+    schema = {
+        "@context": "https://schema.org/",
+        "@type": "Product",
+        "name": "{{ product.title }}",
+        "image": "{{ product.featured_image | image_url: width: 1600 }}",
+        "description": "{{ product.description | strip_html | truncate: 240 }}",
+        "sku": "{{ product.selected_or_first_available_variant.sku }}",
+        "brand": {
+            "@type": "Brand",
+            "name": "{{ product.vendor }}",
+        },
+        "offers": {
+            "@type": "Offer",
+            "url": "{{ canonical_url }}",
+            "priceCurrency": "{{ cart.currency.iso_code }}",
+            "price": "{{ product.selected_or_first_available_variant.price | money_without_currency }}",
+            "availability": "{% if product.selected_or_first_available_variant.available %}https://schema.org/InStock{% else %}https://schema.org/OutOfStock{% endif %}",
+            "shippingDetails": {
+                "@type": "OfferShippingDetails",
+                "shippingDestination": shipping_destinations,
+            },
+            "hasMerchantReturnPolicy": {
+                "@type": "MerchantReturnPolicy",
+                "returnPolicyCategory": "https://schema.org/MerchantReturnFiniteReturnWindow",
+                "merchantReturnDays": return_days,
+                "returnMethod": "https://schema.org/ReturnByMail",
+            },
+        },
+    }
+    return json.dumps(schema, indent=2)
+
+
+def _build_policy_fix_content(check_id: str) -> str:
+    if check_id == "T1":
+        return (
+            "Returns & Refunds Policy\n\n"
+            "We accept returns within 30 days of delivery. Items must be unused, in original packaging, "
+            "and accompanied by proof of purchase. To start a return, contact support with your order number. "
+            "Approved refunds are issued to the original payment method within 5-7 business days after the return is received."
+        )
+    return (
+        "Shipping Policy\n\n"
+        "We currently ship within the United States and Canada. Standard shipping typically arrives within "
+        "5-7 business days, while expedited shipping arrives within 2-3 business days where available. "
+        "Shipping rates and delivery timelines are shown at checkout based on destination."
+    )
+
+
+def build_copy_paste_items(fix_plan: list[FixItem]) -> list[dict]:
+    items: list[dict] = []
+    for fix in fix_plan:
+        if fix.fix_type != "copy_paste" or not fix.proposed_value:
+            continue
+        label = "Policy Draft" if fix.type == "suggest_policy_fix" else "JSON-LD Schema Snippet"
+        items.append({
+            "label": label,
+            "content": fix.proposed_value,
+            "fix_id": fix.fix_id,
+        })
+    return items
+
+
+def _safe_price(value) -> float:
+    try:
+        return float(value) if value is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _catalog_eligibility_missing_fields(product, merchant_data) -> list[str]:
+    missing: list[str] = []
+    taxonomy_gid = (merchant_data.taxonomy_by_product.get(product.id, "") if merchant_data else "") or ""
+    if not taxonomy_gid.strip():
+        missing.append("taxonomy")
+    if not (product.title or "").strip():
+        missing.append("title")
+    has_priced_variant = any(_safe_price(getattr(variant, "price", None)) > 0 for variant in product.variants) if product.variants else False
+    if not has_priced_variant:
+        missing.append("priced variant")
+    return missing
 
 
 def generate_fix_plan(findings: list[Finding], merchant_data=None) -> list[FixItem]:
@@ -85,8 +205,67 @@ def generate_fix_plan(findings: list[Finding], merchant_data=None) -> list[FixIt
 
     items: list[FixItem] = []
     seen_store_level: set[str] = set()
+    seen_product_fix_types: set[tuple[str, str]] = set()
+    product_map = {
+        p.id: p for p in getattr(merchant_data, "products", [])
+    } if merchant_data and hasattr(merchant_data, "products") else {}
 
     for finding in findings:
+        if finding.check_id == "D1b" and product_map:
+            for product_id in finding.affected_products[:20]:
+                product = product_map.get(product_id)
+                if product is None:
+                    continue
+
+                missing_fields = _catalog_eligibility_missing_fields(product, merchant_data)
+
+                if "taxonomy" in missing_fields and ("map_taxonomy", product_id) not in seen_product_fix_types:
+                    seen_product_fix_types.add(("map_taxonomy", product_id))
+                    items.append(FixItem(
+                        fix_id=str(uuid.uuid4()),
+                        type="map_taxonomy",
+                        product_id=product_id,
+                        product_title=product_titles.get(product_id, ""),
+                        field=finding.check_id,
+                        current_value=None,
+                        proposed_value="Assign a Shopify Standard Product Taxonomy category.",
+                        reason=f"{finding.detail} Missing requirement: taxonomy mapping.",
+                        risk="LOW",
+                        reversible=True,
+                        severity=finding.severity,
+                        fix_type="auto",
+                        check_id=finding.check_id,
+                    ))
+
+                remaining_manual_fields = [field for field in missing_fields if field != "taxonomy"]
+                if remaining_manual_fields and ("repair_catalog_eligibility", product_id) not in seen_product_fix_types:
+                    seen_product_fix_types.add(("repair_catalog_eligibility", product_id))
+                    items.append(FixItem(
+                        fix_id=str(uuid.uuid4()),
+                        type="repair_catalog_eligibility",
+                        product_id=product_id,
+                        product_title=product_titles.get(product_id, ""),
+                        field=finding.check_id,
+                        current_value=None,
+                        proposed_value=(
+                            "Update this product so it meets catalog eligibility by adding "
+                            + ", ".join(remaining_manual_fields)
+                            + "."
+                        ),
+                        reason=(
+                            "This product still fails Shopify Catalog eligibility after taxonomy "
+                            "mapping because it is missing: "
+                            + ", ".join(remaining_manual_fields)
+                            + "."
+                        ),
+                        risk="LOW",
+                        reversible=False,
+                        severity=finding.severity,
+                        fix_type="manual",
+                        check_id=finding.check_id,
+                    ))
+            continue
+
         fix_type = CHECK_TO_FIX_TYPE.get(finding.check_id)
         if fix_type is None:
             continue
@@ -105,6 +284,11 @@ def generate_fix_plan(findings: list[Finding], merchant_data=None) -> list[FixIt
             if fix_type in seen_store_level:
                 continue
             seen_store_level.add(fix_type)
+            proposed_value = f"Fix for {finding.title}"
+            if fix_type == "generate_schema_snippet" and merchant_data is not None:
+                proposed_value = _build_schema_snippet_content(merchant_data)
+            elif fix_type == "suggest_policy_fix":
+                proposed_value = _build_policy_fix_content(finding.check_id)
             items.append(FixItem(
                 fix_id=str(uuid.uuid4()),
                 type=fix_type,
@@ -112,7 +296,7 @@ def generate_fix_plan(findings: list[Finding], merchant_data=None) -> list[FixIt
                 product_title="",
                 field=finding.check_id,
                 current_value=None,
-                proposed_value=f"Fix for {finding.title}",
+                proposed_value=proposed_value,
                 reason=finding.detail,
                 risk="LOW",
                 reversible=fix_type != "suggest_policy_fix",
@@ -122,6 +306,9 @@ def generate_fix_plan(findings: list[Finding], merchant_data=None) -> list[FixIt
             ))
         else:
             for product_id in finding.affected_products[:20]:  # cap at 20 products per finding
+                if (fix_type, product_id) in seen_product_fix_types:
+                    continue
+                seen_product_fix_types.add((fix_type, product_id))
                 items.append(FixItem(
                     fix_id=str(uuid.uuid4()),
                     type=fix_type,
@@ -129,7 +316,7 @@ def generate_fix_plan(findings: list[Finding], merchant_data=None) -> list[FixIt
                     product_title=product_titles.get(product_id, ""),
                     field=finding.check_id,
                     current_value=None,
-                    proposed_value=f"Fix for {finding.title}",
+                    proposed_value=finding.fix_instruction,
                     reason=finding.detail,
                     risk="LOW",
                     reversible=True,
@@ -167,7 +354,7 @@ def planner_node(state: StoreOptimizationState) -> dict:
 
     # Generate plan on first run
     if not fix_plan:
-        fix_plan = generate_fix_plan(state["audit_findings"])
+        fix_plan = generate_fix_plan(state["audit_findings"], merchant_data=state.get("store_data"))
 
     # Find next pending approved fix
     pending = [
@@ -278,13 +465,34 @@ async def verifier_node(state: StoreOptimizationState) -> dict:
     retry_count = state.get("retry_count", 0)
 
     executed = state.get("executed_fixes") or []
+    fix_plan = state.get("fix_plan") or []
+    fix_item = next((f for f in fix_plan if f.fix_id == fix_id), None)
     last_success = any(r.fix_id == fix_id and r.success for r in executed)
+    verified_success = last_success
 
     verification_results = dict(state.get("verification_results") or {})
-    if fix_id:
-        verification_results[fix_id] = last_success
 
-    if last_success:
+    if last_success and fix_item is not None:
+        # Copy-paste fixes generate content without writing to Shopify — nothing to verify
+        if fix_item.fix_type == "copy_paste":
+            verified_success = True
+        else:
+            from app.services.shopify_writer import verify_fix_applied
+            try:
+                verified_success = await verify_fix_applied(
+                    getattr(state["store_data"], "admin_domain", None) or state["store_data"].store_domain,
+                    state["admin_token"],
+                    fix_id,
+                    fix_item.type,
+                )
+            except Exception as exc:
+                logger.warning("verifier_node: live verification failed for %s: %s", fix_id, exc)
+                verified_success = False
+
+    if fix_id:
+        verification_results[fix_id] = verified_success
+
+    if verified_success:
         return {
             "verification_results": verification_results,
             "retry_count": 0,
@@ -302,8 +510,6 @@ async def verifier_node(state: StoreOptimizationState) -> dict:
         }
 
     # Exceeded retries — mark as manual action item
-    fix_plan = state.get("fix_plan") or []
-    fix_item = next((f for f in fix_plan if f.fix_id == fix_id), None)
     manual = list(state.get("manual_action_items") or [])
     if fix_item:
         manual_finding = Finding(
@@ -318,9 +524,9 @@ async def verifier_node(state: StoreOptimizationState) -> dict:
             spec_citation="",
             affected_products=[fix_item.product_id] if fix_item.product_id else [],
             affected_count=1,
-            impact_statement="Agent retried twice and could not auto-fix this issue.",
+            impact_statement="Agent could not verify this fix against live Shopify data after retrying.",
             fix_type="manual",
-            fix_instruction=f"Manually apply: {fix_item.proposed_value}",
+            fix_instruction=fix_item.proposed_value,
             fix_content=None,
         )
         manual.append(manual_finding)
@@ -392,46 +598,24 @@ def _recompute_pillars(failing_check_ids: set[str]) -> dict:
     return result
 
 
-def _compute_before_after(
-    original_report: dict,
-    executed_fixes: list,
-    fix_type_map: dict[str, str],
-) -> dict:
+def _compute_before_after(original_report: dict, post_fix_findings: list[Finding]) -> dict:
     """
     Compute before/after comparison from original findings and executed fixes.
     Returns a dict matching BeforeAfterResponse schema.
     """
     original_findings = original_report.get("findings") or []
     original_pillar_dict = original_report.get("pillars") or {}
-
-    # original_report is always deserialized JSON from DB — findings are plain dicts
     original_failing: set[str] = {f.get("check_id", "") for f in original_findings}
+    post_failing: set[str] = {finding.check_id for finding in post_fix_findings}
 
-    resolved_check_ids: set[str] = set()
-    copy_paste_items: list[dict] = []
+    from app.services.report_builder import calculate_pillar_scores
+    current_pillars = {
+        pillar: dataclasses.asdict(score)
+        for pillar, score in calculate_pillar_scores(post_fix_findings).items()
+    }
 
-    for fix_result in executed_fixes:
-        success = fix_result.success if hasattr(fix_result, "success") else fix_result.get("success", False)
-        if not success:
-            continue
-
-        fix_id: str = fix_result.fix_id if hasattr(fix_result, "fix_id") else fix_result.get("fix_id", "")
-
-        fix_type = fix_type_map.get(fix_id, "")
-
-        if fix_type in FIX_TYPE_RESOLVES:
-            resolved_check_ids.update(FIX_TYPE_RESOLVES[fix_type])
-
-        content = fix_result.shopify_gid if hasattr(fix_result, "shopify_gid") else (fix_result.get("shopify_gid") or "")
-        if content and fix_type in ("generate_schema_snippet", "inject_schema_script", "suggest_policy_fix"):
-            label = "Policy Draft" if fix_type == "suggest_policy_fix" else "JSON-LD Schema Snippet"
-            copy_paste_items.append({"label": label, "content": content, "fix_id": fix_id})
-
-    current_failing = original_failing - resolved_check_ids
-    current_pillars = _recompute_pillars(current_failing)
-
-    checks_improved = sorted(original_failing & resolved_check_ids)
-    checks_unchanged = sorted(original_failing - resolved_check_ids)
+    checks_improved = sorted(original_failing - post_failing)
+    checks_unchanged = sorted(original_failing & post_failing)
 
     mcp_before = original_report.get("mcp_simulation")
 
@@ -441,8 +625,7 @@ def _compute_before_after(
         "checks_improved": checks_improved,
         "checks_unchanged": checks_unchanged,
         "mcp_before": mcp_before,
-        "mcp_after": None,      # not re-run post-fix; frontend shows mcp_before only
-        "copy_paste_items": copy_paste_items,
+        "mcp_after": None,
     }
 
 
@@ -458,6 +641,22 @@ async def reporter_node(state: StoreOptimizationState) -> dict:
     executed = state.get("executed_fixes") or []
     failed = state.get("failed_fixes") or []
     manual = state.get("manual_action_items") or []
+    fix_plan = state.get("fix_plan") or []
+
+    def _display_label_for_fix_id(fix_id: str) -> str:
+        fix = next((item for item in fix_plan if item.fix_id == fix_id), None)
+        if fix is None:
+            return fix_id
+        if fix.product_title:
+            return f"{fix.type.replace('_', ' ').title()} for {fix.product_title}"
+        if fix.reason:
+            return fix.reason
+        return fix.type.replace("_", " ").title()
+
+    def _serialize_fix_result(result) -> dict:
+        payload = dataclasses.asdict(result)
+        payload["display_label"] = _display_label_for_fix_id(result.fix_id)
+        return payload
 
     try:
         job_row = await get_job(job_id)
@@ -465,28 +664,95 @@ async def reporter_node(state: StoreOptimizationState) -> dict:
     except Exception:
         original_report = {}
 
-    fix_plan = state.get("fix_plan") or []
-    fix_type_map = {f.fix_id: f.type for f in fix_plan}
-    before_after = _compute_before_after(original_report, executed, fix_type_map)
+    before_after = {
+        "original_pillars": original_report.get("pillars") or {},
+        "current_pillars": original_report.get("pillars") or {},
+        "checks_improved": [],
+        "checks_unchanged": sorted({f.get("check_id", "") for f in original_report.get("findings") or []}),
+        "mcp_before": original_report.get("mcp_simulation"),
+        "mcp_after": None,
+    }
+    refreshed_report_fields: dict = {}
+    try:
+        from app.services.ingestion import fetch_admin_data
+        from app.services.heuristics import run_all_checks
+        from app.services.llm_analysis import analyze_products
+        from app.services.report_builder import (
+            calculate_ai_readiness_score,
+            calculate_channel_compliance,
+            calculate_pillar_scores,
+            get_worst_products,
+        )
+        from app.services.bot_audit import audit_bot_access
+        from app.services.identifier_audit import audit_identifiers
+        from app.services.golden_record import score_store
+        from app.services.trust_signals import score_trust_signals
+        from app.services.feed_generator import (
+            build_chatgpt_feed,
+            build_google_feed,
+            build_perplexity_feed,
+        )
+        from app.services.llms_txt import generate_llms_txt
+
+        store_url = (job_row or {}).get("store_url") or f"https://{state['store_data'].store_domain}"
+        refreshed = await fetch_admin_data(store_url, state["admin_token"])
+        llm_results = await analyze_products(refreshed.products)
+        post_fix_findings = run_all_checks(refreshed, llm_results=llm_results)
+        before_after = _compute_before_after(original_report, post_fix_findings)
+        pillar_scores = calculate_pillar_scores(post_fix_findings)
+        all_products = get_worst_products(refreshed.products, post_fix_findings, n=len(refreshed.products))
+        refreshed_report_fields = {
+            "store_name": refreshed.store_name,
+            "store_domain": refreshed.store_domain,
+            "ingestion_mode": refreshed.ingestion_mode,
+            "total_products": len(refreshed.products),
+            "findings": [dataclasses.asdict(finding) for finding in post_fix_findings],
+            "pillars": {
+                pillar: dataclasses.asdict(score)
+                for pillar, score in pillar_scores.items()
+            },
+            "ai_readiness_score": calculate_ai_readiness_score(pillar_scores),
+            "channel_compliance": dataclasses.asdict(calculate_channel_compliance(post_fix_findings)),
+            "worst_5_products": [dataclasses.asdict(product) for product in all_products[:5]],
+            "all_products": [dataclasses.asdict(product) for product in all_products],
+            "bot_access": audit_bot_access(refreshed.robots_txt),
+            "identifier_audit": audit_identifiers(refreshed),
+            "golden_record": score_store(refreshed),
+            "trust_signals": score_trust_signals(refreshed),
+            "feed_summaries": {
+                "chatgpt": build_chatgpt_feed(refreshed)["summary"],
+                "perplexity": build_perplexity_feed(refreshed)["summary"],
+                "google": build_google_feed(refreshed)["summary"],
+            },
+            "llms_txt_preview": generate_llms_txt(refreshed)[:1500],
+        }
+    except Exception as exc:
+        logger.warning("reporter_node: post-fix re-audit failed for job %s: %s", job_id, exc)
+
     before_after["manual_action_items"] = [dataclasses.asdict(m) for m in manual]
+
+    existing_copy_paste = original_report.get("copy_paste_package") or []
 
     final_report = {
         **original_report,
+        **refreshed_report_fields,
         "agent_run": {
             "fixes_applied": len([r for r in executed if r.success]),
             "fixes_failed": len(failed),
             "manual_action_items": [dataclasses.asdict(m) for m in manual],
-            "executed_fixes": [dataclasses.asdict(r) for r in executed],
-            "failed_fixes": [dataclasses.asdict(r) for r in failed],
+            "executed_fixes": [_serialize_fix_result(r) for r in executed],
+            "failed_fixes": [_serialize_fix_result(r) for r in failed],
             "verification_results": state.get("verification_results") or {},
             "before_after": before_after,
         },
-        "copy_paste_package": before_after.get("copy_paste_items", []),
+        "copy_paste_package": existing_copy_paste,
     }
 
     try:
         await update_job_report(job_id, final_report, status="complete")
     except Exception as exc:
         logger.error("reporter_node: failed to update DB for job %s: %s", job_id, exc)
+        # Escalate so the outer background task can mark the job failed.
+        raise
 
     return {"final_report": final_report}

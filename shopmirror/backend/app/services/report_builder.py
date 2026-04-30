@@ -9,7 +9,7 @@ from app.models.merchant import MerchantData, Product
 from app.models.findings import (
     Finding, PillarScore, AuditReport, PerceptionDiff, ProductPerception,
     MCPResult, CompetitorResult, CopyPasteItem, ProductSummary,
-    ChannelStatus, ChannelCompliance, QueryMatchResult,
+    ChannelStatus, ChannelCompliance,
 )
 
 # ---------------------------------------------------------------------------
@@ -168,9 +168,9 @@ async def assemble_report(
     findings: list[Finding],
     perception_diff: PerceptionDiff | None,
     mcp_results: list[MCPResult] | None,
-    query_match_results: list[QueryMatchResult],
     competitor_results: list[CompetitorResult],
     copy_paste_items: list[CopyPasteItem],
+    query_match_results: list = None,
     product_perceptions: list | None = None,
     bot_access: dict | None = None,
     identifier_audit: dict | None = None,
@@ -178,23 +178,64 @@ async def assemble_report(
     trust_signals: dict | None = None,
     feed_summaries: dict | None = None,
     llms_txt_preview: str | None = None,
+    scan_limited: bool = False,
+    full_product_count: int = 0,
 ) -> AuditReport:
     """
     Assembles all pipeline outputs into a single AuditReport.
     No awaits needed — async for future-proofing only.
     """
+    query_match_results = query_match_results or []
     try:
+        total_products = len(merchant_data.products)
+
+        # Empty store: no products means no checks can be evaluated — score is 0, not 100
+        if total_products == 0:
+            default_channel = ChannelStatus(status="BLOCKED", blocking_check_ids=[])
+            return AuditReport(
+                store_name=merchant_data.store_name,
+                store_domain=merchant_data.store_domain,
+                ingestion_mode=merchant_data.ingestion_mode,
+                total_products=0,
+                ai_readiness_score=0.0,
+                pillars={},
+                findings=[],
+                worst_5_products=[],
+                all_products=[],
+                channel_compliance=ChannelCompliance(
+                    shopify_catalog=default_channel,
+                    google_shopping=default_channel,
+                    meta_catalog=default_channel,
+                    perplexity_web=default_channel,
+                    chatgpt_shopping=default_channel,
+                ),
+                perception_diff=perception_diff,
+                product_perceptions=product_perceptions or [],
+                mcp_simulation=mcp_results,
+                query_match_results=[],
+                competitor_comparison=competitor_results or [],
+                copy_paste_package=copy_paste_items or [],
+                bot_access=bot_access,
+                identifier_audit=identifier_audit,
+                golden_record=golden_record,
+                trust_signals=trust_signals,
+                feed_summaries=feed_summaries,
+                llms_txt_preview=llms_txt_preview,
+                scan_limited=scan_limited,
+                full_product_count=full_product_count,
+            )
+
         pillar_scores = calculate_pillar_scores(findings)
         ai_readiness_score = calculate_ai_readiness_score(pillar_scores)
         channel_compliance = calculate_channel_compliance(findings)
-        all_products = get_worst_products(merchant_data.products, findings, n=len(merchant_data.products))
+        all_products = get_worst_products(merchant_data.products, findings, n=total_products)
         worst_5_products = all_products[:5]
 
         return AuditReport(
             store_name=merchant_data.store_name,
             store_domain=merchant_data.store_domain,
             ingestion_mode=merchant_data.ingestion_mode,
-            total_products=len(merchant_data.products),
+            total_products=total_products,
             ai_readiness_score=ai_readiness_score,
             pillars=pillar_scores,
             findings=findings,
@@ -213,6 +254,8 @@ async def assemble_report(
             trust_signals=trust_signals,
             feed_summaries=feed_summaries,
             llms_txt_preview=llms_txt_preview,
+            scan_limited=scan_limited,
+            full_product_count=full_product_count,
         )
     except Exception:
         # Fallback: return a minimal valid report so the job doesn't crash

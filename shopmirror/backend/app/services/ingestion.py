@@ -36,6 +36,18 @@ def _normalize_url(store_url: str) -> str:
     return url
 
 
+def _bare_domain(url: str) -> str:
+    return re.sub(r"^https?://", "", _normalize_url(url))
+
+
+_MYSHOPIFY_RE = re.compile(r"([a-z0-9][a-z0-9\-]*\.myshopify\.com)", re.IGNORECASE)
+
+
+def _extract_myshopify_domain(text: str) -> Optional[str]:
+    match = _MYSHOPIFY_RE.search(text or "")
+    return match.group(1).lower() if match else None
+
+
 def _extract_json_ld(html: str) -> list[dict]:
     """Return all parsed JSON-LD blocks found in an HTML page."""
     blocks: list[dict] = []
@@ -171,6 +183,54 @@ async def _get_text(client: httpx.AsyncClient, url: str) -> tuple[int, str]:
     """Return (status_code, text)."""
     response = await client.get(url)
     return response.status_code, response.text
+
+
+async def _discover_admin_domain(base_url: str, client: httpx.AsyncClient) -> Optional[str]:
+    """Best-effort discovery of the canonical myshopify domain from structured public metadata."""
+    for url in (f"{base_url}/meta.json",):
+        try:
+            response = await client.get(url)
+        except (httpx.HTTPStatusError, httpx.RequestError):
+            continue
+        candidates = [response.text]
+        for candidate in candidates:
+            discovered = _extract_myshopify_domain(candidate)
+            if discovered:
+                return discovered
+    return None
+
+
+async def resolve_admin_domain(store_url: str, admin_token: str) -> str:
+    """Resolve the canonical domain to use for Shopify Admin API calls."""
+    base_url = _normalize_url(store_url)
+    input_domain = _bare_domain(store_url)
+    if input_domain.endswith(".myshopify.com"):
+        return input_domain
+
+    async with httpx.AsyncClient(
+        timeout=20.0,
+        follow_redirects=True,
+        headers={"User-Agent": "ShopMirror/1.0 (+https://shopmirror.ai)"},
+    ) as client:
+        discovered = await _discover_admin_domain(base_url, client)
+
+    candidates = [candidate for candidate in [discovered, input_domain] if candidate]
+    seen: set[str] = set()
+    shop_query = "query ShopIdentity { shop { myshopifyDomain } }"
+
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        admin_url = f"https://{candidate}/admin/api/{_ADMIN_API_VERSION}/graphql.json"
+        try:
+            body = await _run_admin_query(admin_url, admin_token, shop_query)
+        except Exception:
+            continue
+        shop = (body.get("data") or {}).get("shop") or {}
+        return (shop.get("myshopifyDomain") or candidate).lower()
+
+    return input_domain
 
 
 @async_retry
@@ -398,6 +458,7 @@ async def fetch_public_data(store_url: str) -> MerchantData:
         metafields_by_product={},
         seo_by_product={},
         inventory_by_variant={},
+        admin_domain=domain,
         taxonomy_by_product={},
         markets_by_product={},
         metafield_definitions=[],
@@ -644,8 +705,8 @@ async def fetch_admin_data(store_url: str, admin_token: str) -> MerchantData:
     Calls fetch_public_data first, then enriches with Admin API data for
     metafields, SEO, taxonomy, inventory, translations, and metafield definitions.
     """
-    base_url = _normalize_url(store_url)
-    admin_url = f"{base_url}/admin/api/{_ADMIN_API_VERSION}/graphql.json"
+    admin_domain = await resolve_admin_domain(store_url, admin_token)
+    admin_url = f"https://{admin_domain}/admin/api/{_ADMIN_API_VERSION}/graphql.json"
 
     # Start with public data
     data = await fetch_public_data(store_url)
@@ -665,6 +726,7 @@ async def fetch_admin_data(store_url: str, admin_token: str) -> MerchantData:
     data.seo_by_product = seo_by_product
     data.taxonomy_by_product = taxonomy_by_product
     data.inventory_by_variant = inventory_by_variant
+    data.admin_domain = admin_domain
     data.markets_by_product = markets_by_product
     data.metafield_definitions = metafield_definitions
     data.ingestion_mode = "admin_token"
@@ -883,8 +945,8 @@ async def fetch_bulk_products(store_url: str, admin_token: str) -> list[Product]
     Step 2: Poll currentBulkOperation every 3s (5 min timeout)
     Step 3: Download and parse the JSONL result file
     """
-    base_url = _normalize_url(store_url)
-    admin_url = f"{base_url}/admin/api/{_ADMIN_API_VERSION}/graphql.json"
+    admin_domain = await resolve_admin_domain(store_url, admin_token)
+    admin_url = f"https://{admin_domain}/admin/api/{_ADMIN_API_VERSION}/graphql.json"
 
     await _start_bulk_operation(admin_url, admin_token)
     download_url = await _poll_bulk_operation(admin_url, admin_token)

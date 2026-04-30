@@ -16,6 +16,11 @@ const FIX_TYPE_LABELS: Record<string, string> = {
   inject_schema_script:        'Add AI-readable schema markup',
   generate_schema_snippet:     'Create schema markup (copy-paste)',
   suggest_policy_fix:          'Draft policy improvements',
+  repair_catalog_eligibility:  'Repair catalog eligibility manually',
+  rename_variant_options:      'Rename variant options manually',
+  supply_identifiers:          'Add product identifiers manually',
+  repair_availability_schema:  'Repair availability schema manually',
+  align_seo_metadata:          'Align SEO metadata manually',
 }
 
 const FIX_DESCRIPTIONS: Record<string, string> = {
@@ -28,6 +33,11 @@ const FIX_DESCRIPTIONS: Record<string, string> = {
   inject_schema_script:        'Injects structured data into your storefront so AI checkout agents can read shipping and return information.',
   generate_schema_snippet:     'Generates a JSON-LD block you can paste into your theme to make your store visible to AI shopping agents.',
   suggest_policy_fix:          'Drafts clearer policy language with explicit dates and regions that AI agents can extract and verify.',
+  repair_catalog_eligibility:  'Some catalog blockers need a human fix, such as adding a real title or a priced variant before the product can qualify.',
+  rename_variant_options:      'Variant labels like Option1 and Option2 need a human-readable rename in Shopify Admin.',
+  supply_identifiers:          'GTINs, barcodes, and manufacturer identifiers must come from your catalog source of truth, not be invented automatically.',
+  repair_availability_schema:  'Availability markup needs a storefront/schema implementation change rather than a blind content write.',
+  align_seo_metadata:          'SEO titles and descriptions should be reviewed and updated manually so search-facing copy stays intentional.',
 }
 
 const PREVIEW_COUNT = 5
@@ -52,12 +62,11 @@ export default function FixApproval({ jobId, onExecute }: Props) {
   const [fixes, setFixes] = useState<FixItem[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [expandedFixes, setExpandedFixes] = useState<Set<string>>(new Set())
-  const [cpChoice, setCpChoice] = useState<Record<string, 'run' | 'self'>>({})
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [executing, setExecuting] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Section expand state
   const [showAllAuto, setShowAllAuto] = useState(false)
   const [cpOpen, setCpOpen] = useState(false)
   const [manualOpen, setManualOpen] = useState(false)
@@ -89,9 +98,6 @@ export default function FixApproval({ jobId, onExecute }: Props) {
     })
   }
 
-  const setCpRun = (id: string) => setCpChoice(prev => ({ ...prev, [id]: 'run' }))
-  const setCpSelf = (id: string) => setCpChoice(prev => ({ ...prev, [id]: 'self' }))
-
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopiedId(id)
@@ -99,17 +105,17 @@ export default function FixApproval({ jobId, onExecute }: Props) {
     })
   }
 
-  const allApprovedIds = () => {
-    const cpRunIds = Object.entries(cpChoice).filter(([, v]) => v === 'run').map(([k]) => k)
-    return [...selected, ...cpRunIds]
+  const handleExecute = async () => {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    setShowConfirm(true)
   }
 
-  const handleExecute = async () => {
-    const ids = allApprovedIds()
-    if (ids.length === 0) return
+  const confirmAndExecute = async () => {
+    setShowConfirm(false)
     setExecuting(true)
     try {
-      await onExecute(allApprovedIds())
+      await onExecute([...selected])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong — please try again')
       setExecuting(false)
@@ -140,7 +146,6 @@ export default function FixApproval({ jobId, onExecute }: Props) {
   const visibleAuto = showAllAuto ? autofixable : autofixable.slice(0, PREVIEW_COUNT)
   const hiddenAutoCount = autofixable.length - PREVIEW_COUNT
 
-  // Collapsible section header used for copy-paste and manual
   const SectionHeader = ({
     label, badge, badgeStyle, open, onToggle, count,
   }: {
@@ -262,6 +267,52 @@ export default function FixApproval({ jobId, onExecute }: Props) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
 
+      {/* Confirmation modal */}
+      {showConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 100,
+          background: 'rgba(14,13,18,0.75)', backdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'var(--ink-2)', border: '1px solid var(--ink-line)',
+            borderRadius: 20, padding: '32px 36px', maxWidth: 440, width: '90%',
+            display: 'flex', flexDirection: 'column', gap: 20,
+          }}>
+            <div>
+              <p style={{ margin: '0 0 6px', fontFamily: 'var(--font-display)', fontSize: 22, lineHeight: 1.2, color: 'var(--m-fg)', fontWeight: 400 }}>
+                Apply {selected.size} fix{selected.size !== 1 ? 'es' : ''} to your store?
+              </p>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--m-fg-3)', lineHeight: 1.5 }}>
+                These changes will be made to your live Shopify store. Every fix is logged and you can reverse any individual change after it is applied.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowConfirm(false)}
+                style={{
+                  padding: '10px 20px', borderRadius: 100, fontSize: 13, fontFamily: 'var(--font-geist)',
+                  cursor: 'pointer', background: 'transparent',
+                  border: '1px solid var(--ink-line)', color: 'var(--m-fg-2)',
+                }}
+              >
+                Go back
+              </button>
+              <button
+                onClick={confirmAndExecute}
+                style={{
+                  padding: '10px 20px', borderRadius: 100, fontSize: 13, fontWeight: 600,
+                  fontFamily: 'var(--font-geist)', cursor: 'pointer',
+                  background: 'var(--m-violet)', color: 'white', border: 'none',
+                }}
+              >
+                Yes, apply fixes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header + CTA */}
       <div style={{
         background: 'var(--paper)', color: 'var(--paper-ink)',
@@ -272,20 +323,20 @@ export default function FixApproval({ jobId, onExecute }: Props) {
         <div>
           <div className="eyebrow-paper">Ready to apply</div>
           <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 28, lineHeight: 1.1, margin: '8px 0 4px', fontWeight: 400, color: 'var(--paper-ink)' }}>
-            {allApprovedIds().length} fix{allApprovedIds().length !== 1 ? 'es' : ''} selected
+            {selected.size} auto-fix{selected.size !== 1 ? 'es' : ''} selected
           </h3>
           <p style={{ margin: 0, fontSize: 13, color: 'rgba(26,24,18,0.6)', fontFamily: 'var(--font-geist)' }}>
-            Review each change below, then apply in one click. Every fix is reversible.
+            Review the true auto-fixes below, then apply them in one click. Generated schema and policy content stays manual so the system never pretends it changed your storefront when it only drafted guidance.
           </p>
         </div>
         <button
           onClick={handleExecute}
-          disabled={executing || allApprovedIds().length === 0}
+          disabled={executing || selected.size === 0}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 10,
             padding: '14px 24px', borderRadius: 100, fontSize: 14, fontWeight: 600,
-            fontFamily: 'var(--font-geist)', cursor: executing || allApprovedIds().length === 0 ? 'not-allowed' : 'pointer',
-            background: executing || allApprovedIds().length === 0 ? 'rgba(26,24,18,0.2)' : 'var(--paper-ink)',
+            fontFamily: 'var(--font-geist)', cursor: executing || selected.size === 0 ? 'not-allowed' : 'pointer',
+            background: executing || selected.size === 0 ? 'rgba(26,24,18,0.2)' : 'var(--paper-ink)',
             color: 'var(--paper)', border: 'none', transition: 'background 200ms',
           }}
         >
@@ -333,7 +384,7 @@ export default function FixApproval({ jobId, onExecute }: Props) {
         </div>
       )}
 
-      {/* Copy-paste section — collapsed by default */}
+      {/* Copy-paste section */}
       {copyPaste.length > 0 && (
         <div style={{
           borderRadius: 14,
@@ -354,56 +405,52 @@ export default function FixApproval({ jobId, onExecute }: Props) {
           {cpOpen && (
             <div style={{ padding: '0 18px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
               <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--m-fg-3)', fontFamily: 'var(--font-geist)', lineHeight: 1.5 }}>
-                These improvements cannot be applied automatically but we have written them for you. Choose how to handle each one.
+                These improvements are generated for you, but they are not executed automatically. Preview the exact content below and copy it when you are ready to apply it yourself.
               </p>
               {copyPaste.map(fix => {
-                const choice = cpChoice[fix.fix_id]
                 return (
                   <div key={fix.fix_id} style={{
                     padding: '14px 18px', borderRadius: 14,
-                    background: choice === 'run' ? 'var(--ink-2)' : 'rgba(0,0,0,0.15)',
-                    border: choice === 'run' ? '1px solid rgba(143,184,154,0.25)' : '1px solid rgba(212,169,107,0.12)',
+                    background: 'rgba(0,0,0,0.15)',
+                    border: '1px solid rgba(212,169,107,0.12)',
                     transition: 'all 150ms ease',
                   }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: choice === 'run' ? 'var(--m-good)' : 'var(--m-warn)', marginBottom: 3 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--m-warn)', marginBottom: 3 }}>
                       {FIX_TYPE_LABELS[fix.type] ?? fix.type}
                     </div>
                     <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--m-fg-3)', lineHeight: 1.4 }}>
                       {FIX_DESCRIPTIONS[fix.type] ?? fix.reason}
                     </p>
+                    <pre style={{
+                      margin: '0 0 10px',
+                      padding: '12px 14px',
+                      borderRadius: 10,
+                      background: 'var(--ink-2)',
+                      border: '1px solid var(--ink-line)',
+                      color: 'var(--m-fg-2)',
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                      fontFamily: 'var(--font-geist-mono)',
+                      whiteSpace: 'pre-wrap',
+                      overflowX: 'auto',
+                      maxHeight: 240,
+                    }}>
+                      {fix.proposed_value}
+                    </pre>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button
-                        onClick={() => setCpRun(fix.fix_id)}
+                        onClick={() => copyToClipboard(fix.proposed_value || fix.reason, fix.fix_id)}
                         style={{
                           display: 'inline-flex', alignItems: 'center', gap: 5,
                           padding: '6px 12px', borderRadius: 8, fontSize: 12, fontFamily: 'var(--font-geist)',
-                          fontWeight: choice === 'run' ? 600 : 400, cursor: 'pointer',
-                          background: choice === 'run' ? 'rgba(143,184,154,0.15)' : 'transparent',
-                          color: choice === 'run' ? 'var(--m-good)' : 'var(--m-fg-2)',
-                          border: choice === 'run' ? '1px solid rgba(143,184,154,0.3)' : '1px solid var(--ink-line)',
+                          fontWeight: 500, cursor: 'pointer',
+                          background: copiedId === fix.fix_id ? 'rgba(143,184,154,0.15)' : 'transparent',
+                          color: copiedId === fix.fix_id ? 'var(--m-good)' : 'var(--m-fg-2)',
+                          border: copiedId === fix.fix_id ? '1px solid rgba(143,184,154,0.3)' : '1px solid var(--ink-line)',
                           transition: 'all 150ms ease',
                         }}
                       >
-                        {choice === 'run' && (
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                          </svg>
-                        )}
-                        Just change it
-                      </button>
-                      <button
-                        onClick={() => { copyToClipboard(fix.proposed_value || fix.reason, fix.fix_id); setCpSelf(fix.fix_id) }}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 5,
-                          padding: '6px 12px', borderRadius: 8, fontSize: 12, fontFamily: 'var(--font-geist)',
-                          fontWeight: choice === 'self' ? 600 : 400, cursor: 'pointer',
-                          background: choice === 'self' ? 'rgba(212,169,107,0.1)' : 'transparent',
-                          color: copiedId === fix.fix_id ? 'var(--m-good)' : choice === 'self' ? 'var(--m-warn)' : 'var(--m-fg-2)',
-                          border: choice === 'self' ? '1px solid rgba(212,169,107,0.3)' : '1px solid var(--ink-line)',
-                          transition: 'all 150ms ease',
-                        }}
-                      >
-                        {copiedId === fix.fix_id ? 'Copied!' : "Copy — I'll do it myself"}
+                        {copiedId === fix.fix_id ? 'Copied!' : 'Copy generated content'}
                       </button>
                     </div>
                   </div>
@@ -414,7 +461,7 @@ export default function FixApproval({ jobId, onExecute }: Props) {
         </div>
       )}
 
-      {/* Manual / developer section — collapsed by default */}
+      {/* Manual / developer section */}
       {manualItems.length > 0 && (
         <div style={{
           borderRadius: 14,

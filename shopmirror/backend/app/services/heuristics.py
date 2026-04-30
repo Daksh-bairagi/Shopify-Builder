@@ -571,12 +571,19 @@ def check_image_alt_text(data: MerchantData) -> list[Finding]:
     try:
         total = 0
         covered = 0
+        failing_product_ids: list[str] = []
 
         for p in data.products:
+            product_missing_alt = False
             for img in p.images:
                 total += 1
                 if img.alt and img.alt.strip():
                     covered += 1
+                else:
+                    product_missing_alt = True
+
+            if product_missing_alt:
+                failing_product_ids.append(p.id)
 
         if total == 0:
             return findings
@@ -596,7 +603,7 @@ def check_image_alt_text(data: MerchantData) -> list[Finding]:
                     "your product imagery, losing a critical source of product attribute data."
                 ),
                 spec_citation="AI crawler: alt text is primary image signal",
-                affected_products=[],
+                affected_products=failing_product_ids,
                 impact_statement=f"Alt text coverage: {pct:.0%} ({covered}/{total} images)",
                 fix_type="auto",
                 fix_instruction=(

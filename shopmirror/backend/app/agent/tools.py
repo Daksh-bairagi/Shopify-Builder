@@ -88,6 +88,10 @@ def _find_product(store_data: MerchantData, product_id: str):
     return next((p for p in store_data.products if p.id == product_id), None)
 
 
+def _admin_domain(store_data: MerchantData) -> str:
+    return getattr(store_data, "admin_domain", None) or store_data.store_domain
+
+
 def _ok(fix_id: str, gid: str) -> FixResult:
     return FixResult(
         fix_id=fix_id,
@@ -142,7 +146,7 @@ async def improve_title(
 
         product_gid = f"gid://shopify/Product/{product.id}"
         gid = await shopify_writer.write_title(
-            store_data.store_domain,
+            _admin_domain(store_data),
             admin_token,
             product_gid,
             result.improved_title,
@@ -190,11 +194,20 @@ async def map_taxonomy(
         if not result.taxonomy_gid.startswith("gid://shopify/TaxonomyCategory/"):
             return _fail(fix_item.fix_id, f"Invalid taxonomy GID format: {result.taxonomy_gid}")
 
+        # Validate the numeric ID refers to a real Shopify Standard Taxonomy node
+        from app.services.shopify_writer import validate_taxonomy_gid
+        if not await validate_taxonomy_gid(_admin_domain(store_data), admin_token, result.taxonomy_gid):
+            return _fail(
+                fix_item.fix_id,
+                f"Taxonomy GID does not exist in Shopify Standard Taxonomy: {result.taxonomy_gid} "
+                f"(path attempted: {result.taxonomy_path})",
+            )
+
         product_gid = f"gid://shopify/Product/{product.id}"
         original_gid = store_data.taxonomy_by_product.get(product.id)
 
         gid = await shopify_writer.write_taxonomy(
-            store_data.store_domain,
+            _admin_domain(store_data),
             admin_token,
             product_gid,
             result.taxonomy_gid,
@@ -238,7 +251,7 @@ async def classify_product_type(
 
         product_gid = f"gid://shopify/Product/{product.id}"
         gid = await shopify_writer.write_product_type(
-            store_data.store_domain,
+            _admin_domain(store_data),
             admin_token,
             product_gid,
             result.product_type,
@@ -289,7 +302,7 @@ async def fill_metafield(
         for key, (value, type_) in field_map.items():
             if value:
                 await shopify_writer.write_metafield(
-                    store_data.store_domain,
+                    _admin_domain(store_data),
                     admin_token,
                     product_gid,
                     namespace="custom",
@@ -324,37 +337,34 @@ async def generate_alt_text(
     if product is None:
         return _fail(fix_item.fix_id, f"Product {fix_item.product_id} not found")
 
-    # Find first image without alt text
-    target_image = next(
-        (img for img in product.images if not img.alt or not img.alt.strip()),
-        product.images[0] if product.images else None,
-    )
+    target_images = [img for img in product.images if not img.alt or not img.alt.strip()]
 
-    if target_image is None:
+    if not target_images:
         return _fail(fix_item.fix_id, "No images found on product")
 
     try:
         llm = _get_llm(AltTextGeneration)
-        result: AltTextGeneration = await llm.ainvoke(
-            f"Product title: {product.title}\n"
-            f"product_type: {product.product_type}\n"
-            f"Image position: {target_image.position}\n"
-            "Generate descriptive alt text for this product image. Max 125 characters. "
-            "Describe what the image likely shows based on product type and title."
-        )
+        for target_image in target_images:
+            result: AltTextGeneration = await llm.ainvoke(
+                f"Product title: {product.title}\n"
+                f"product_type: {product.product_type}\n"
+                f"Image position: {target_image.position}\n"
+                "Generate descriptive alt text for this product image. Max 125 characters. "
+                "Describe what the image likely shows based on product type and title."
+            )
 
-        image_gid = f"gid://shopify/MediaImage/{target_image.id}"
-        gid = await shopify_writer.write_alt_text(
-            store_data.store_domain,
-            admin_token,
-            image_gid,
-            result.alt_text,
-            target_image.alt,
-            job_id,
-            fix_item.fix_id,
-            product_id=product.id,
-        )
-        return _ok(fix_item.fix_id, gid)
+            image_gid = f"gid://shopify/MediaImage/{target_image.id}"
+            await shopify_writer.write_alt_text(
+                _admin_domain(store_data),
+                admin_token,
+                image_gid,
+                result.alt_text,
+                target_image.alt,
+                job_id,
+                f"{fix_item.fix_id}_{target_image.id}",
+                product_id=product.id,
+            )
+        return _ok(fix_item.fix_id, f"gid://shopify/Product/{product.id}")
     except Exception as exc:
         logger.error("generate_alt_text failed for %s: %s", fix_item.product_id, exc)
         return _fail(fix_item.fix_id, str(exc))
@@ -378,14 +388,14 @@ async def create_metafield_definitions(
     try:
         for namespace, key, name, type_ in definitions:
             await shopify_writer.create_metafield_definition(
-                store_data.store_domain,
+                _admin_domain(store_data),
                 admin_token,
                 namespace,
                 key,
                 name,
                 type_,
             )
-        return _ok(fix_item.fix_id, f"gid://shopify/Store/{store_data.store_domain}")
+        return _ok(fix_item.fix_id, f"gid://shopify/Store/{_admin_domain(store_data)}")
     except Exception as exc:
         logger.error("create_metafield_definitions failed: %s", exc)
         return _fail(fix_item.fix_id, str(exc))
@@ -456,6 +466,21 @@ async def generate_schema_snippet(
     """Generate a JSON-LD schema snippet for copy-paste use. No writes."""
     try:
         import json
+        shipping_destinations = ["US"]
+        shipping_text = (store_data.policies.shipping or "").lower()
+        if "canada" in shipping_text:
+            shipping_destinations.append("CA")
+        if "united kingdom" in shipping_text or re.search(r"\buk\b", shipping_text):
+            shipping_destinations.append("GB")
+        if "australia" in shipping_text:
+            shipping_destinations.append("AU")
+
+        return_days = 30
+        if store_data.policies.refund:
+            match = re.search(r"(\d+)\s*(?:day|days|business\s+day|business\s+days)", store_data.policies.refund, re.IGNORECASE)
+            if match:
+                return_days = int(match.group(1))
+
         schema = {
             "@context": "https://schema.org/",
             "@type": "Product",
@@ -473,6 +498,19 @@ async def generate_schema_snippet(
                 "priceCurrency": "{{cart.currency.iso_code}}",
                 "price": "{{product.selected_variant.price | money_without_currency}}",
                 "availability": "https://schema.org/InStock",
+                "shippingDetails": {
+                    "@type": "OfferShippingDetails",
+                    "shippingDestination": [
+                        {"@type": "DefinedRegion", "addressCountry": code}
+                        for code in shipping_destinations
+                    ],
+                },
+                "hasMerchantReturnPolicy": {
+                    "@type": "MerchantReturnPolicy",
+                    "returnPolicyCategory": "https://schema.org/MerchantReturnFiniteReturnWindow",
+                    "merchantReturnDays": return_days,
+                    "returnMethod": "https://schema.org/ReturnByMail",
+                },
             },
         }
         # Return success — the calling node will add to copy_paste_package
@@ -500,7 +538,7 @@ async def suggest_policy_fix(
 ) -> FixResult:
     """Generate a policy draft for copy-paste. No writes to Shopify."""
     try:
-        policy_type = "refund" if "T1" in fix_item.fix_id or "refund" in fix_item.field.lower() else "shipping"
+        policy_type = "refund" if fix_item.check_id == "T1" else "shipping"
 
         drafts = {
             "refund": (

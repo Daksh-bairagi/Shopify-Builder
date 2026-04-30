@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import type { AuditReport, ChannelStatus, QueryMatchResult } from '../api/client'
+import { useEffect, useState } from 'react'
+import { API_BASE_URL, type AuditReport, type ChannelStatus, type CompetitorResult } from '../api/client'
 import FindingsTable from './FindingsTable'
 import CompetitorPanel from './CompetitorPanel'
+import CompetitorDiscovery from './CompetitorDiscovery'
 import MCPSimulation from './MCPSimulation'
 import PerceptionDiff from './PerceptionDiff'
 import FixApproval from './FixApproval'
@@ -10,29 +11,33 @@ import BeforeAfterReport from './BeforeAfterReport'
 import ReadinessCertificate from './ReadinessCertificate'
 import HeatmapGrid from './HeatmapGrid'
 import { CHECK_LABELS } from '../utils/labels'
+import { normalizeScore, overallFromPillars, scoreBand } from '../utils/score'
 
 interface Props {
   report: AuditReport
   jobId: string
   adminToken: string | null
+  error: string | null
   onReset: () => void
+  onRestartWithUrl?: (prefilledUrl: string) => void
   onExecute: (approvedFixIds: string[]) => Promise<void>
+  onReportRefresh?: () => void | Promise<void>
 }
 
 type Tab = 'overview' | 'perception' | 'findings' | 'products' | 'fixes'
 
-// ── Score helpers ───────────────────────────────────────────────────────
-function scoreBand(s: number) {
-  if (s >= 80) return { label: 'Excellent', c: 'var(--m-good)',  cp: 'var(--m-good-p)' }
-  if (s >= 60) return { label: 'Solid',     c: 'var(--m-info)',  cp: 'var(--m-info-p)' }
-  if (s >= 40) return { label: 'Needs work',c: 'var(--m-warn)',  cp: 'var(--m-warn-p)' }
-  return              { label: 'Critical',  c: 'var(--m-bad)',   cp: 'var(--m-bad-p)'  }
-}
-
 function channelColor(status: ChannelStatus['status']) {
   if (status === 'READY')   return { c: 'var(--m-good)', bg: 'rgba(143,184,154,0.12)', border: 'rgba(143,184,154,0.25)' }
   if (status === 'PARTIAL') return { c: 'var(--m-warn)', bg: 'rgba(212,169,107,0.12)', border: 'rgba(212,169,107,0.25)' }
+  // BLOCKED and NOT_READY share the failure styling.
   return                           { c: 'var(--m-bad)',  bg: 'rgba(213,122,120,0.12)', border: 'rgba(213,122,120,0.25)' }
+}
+
+const CHANNEL_STATUS_LABELS: Record<string, string> = {
+  READY: 'Ready',
+  PARTIAL: 'Partial',
+  NOT_READY: 'Not ready',
+  BLOCKED: 'Blocked',
 }
 
 const PILLAR_LABELS: Record<string, string> = {
@@ -45,9 +50,10 @@ const PILLAR_LABELS: Record<string, string> = {
 
 // Derives a plain-English verdict from findings when perception_diff is unavailable
 function deriveVerdict(report: AuditReport): string {
-  const critCount = report.findings.filter(f => f.severity === 'CRITICAL').length
-  const highCount  = report.findings.filter(f => f.severity === 'HIGH').length
-  const score      = Math.round(report.ai_readiness_score)
+  const findings = report.findings ?? []
+  const critCount = findings.filter(f => f.severity === 'CRITICAL').length
+  const highCount  = findings.filter(f => f.severity === 'HIGH').length
+  const score      = normalizeScore(report.ai_readiness_score)
 
   const readyChannels = Object.values(report.channel_compliance).filter(c => c.status === 'READY').length
   const totalChannels = Object.values(report.channel_compliance).length
@@ -104,7 +110,7 @@ function StatusDot({ color, size = 7 }: { color: string; size?: number }) {
 
 // ── Pillar bar ──────────────────────────────────────────────────────────
 function PillarBar({ label, score }: { label: string; score: number }) {
-  const s100 = Math.round(score >= 1 ? score : score * 100)
+  const s100 = normalizeScore(score)
   const c = s100 >= 70 ? 'var(--m-info)' : s100 >= 45 ? 'var(--m-warn)' : 'var(--m-bad)'
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -131,23 +137,6 @@ function SeverityTag({ severity }: { severity: string }) {
   )
 }
 
-// ── Query match bar ─────────────────────────────────────────────────────
-function QueryMatchBar({ result }: { result: QueryMatchResult }) {
-  const pct = result.total_products > 0 ? Math.round((result.match_count / result.total_products) * 100) : 0
-  const c = pct >= 70 ? 'var(--m-good)' : pct >= 40 ? 'var(--m-warn)' : 'var(--m-bad)'
-  return (
-    <div style={{ background: 'var(--ink-3)', border: '1px solid var(--ink-line)', borderRadius: 12, padding: '14px 16px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-        <span style={{ fontSize: 13, color: 'var(--m-fg-2)' }}>{result.query}</span>
-        <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: 'var(--m-fg-3)', flexShrink: 0 }}>{result.match_count}/{result.total_products}</span>
-      </div>
-      <div style={{ height: 2, background: 'rgba(255,255,255,0.06)', borderRadius: 100, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: c, borderRadius: 100 }} />
-      </div>
-    </div>
-  )
-}
-
 // ────────────────────────────────────────────────────────────────────────
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview',   label: 'Overview' },
@@ -157,13 +146,23 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'fixes',      label: 'Fix Plan' },
 ]
 
-export default function Dashboard({ report, jobId, adminToken, onReset, onExecute }: Props) {
+export default function Dashboard({ report, jobId, adminToken, error, onReset, onRestartWithUrl, onExecute, onReportRefresh }: Props) {
   const [tab, setTab] = useState<Tab>('overview')
-  const score = Math.round(report.ai_readiness_score)
+  const [competitorResults, setCompetitorResults] = useState<CompetitorResult[]>(report.competitor_comparison ?? [])
+  // If the report changes (e.g. after an agent run or rollback refresh), pick up the new server-side competitor data.
+  useEffect(() => {
+    setCompetitorResults(report.competitor_comparison ?? [])
+  }, [report])
+  // Use the same overall calc as BeforeAfterReport so hero/after never diverge.
+  const pillars = report.pillars ?? {}
+  const score = Object.keys(pillars).length
+    ? overallFromPillars(pillars)
+    : normalizeScore(report.ai_readiness_score)
   const band  = scoreBand(score)
-  const channels = Object.entries(report.channel_compliance) as [string, ChannelStatus][]
-  const critCount  = report.findings.filter(f => f.severity === 'CRITICAL').length
-  const highCount  = report.findings.filter(f => f.severity === 'HIGH').length
+  const channels = Object.entries(report.channel_compliance ?? {}) as [string, ChannelStatus][]
+  const findings = report.findings ?? []
+  const critCount  = findings.filter(f => f.severity === 'CRITICAL').length
+  const highCount  = findings.filter(f => f.severity === 'HIGH').length
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--ink)', color: 'var(--m-fg)', fontFamily: 'var(--font-geist)' }}>
@@ -212,9 +211,9 @@ export default function Dashboard({ report, jobId, adminToken, onReset, onExecut
                 display: 'inline-flex', alignItems: 'center', gap: 6,
               }}>
                 {t.label}
-                {t.id === 'findings' && report.findings.length > 0 && (
+                {t.id === 'findings' && findings.length > 0 && (
                   <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, padding: '2px 6px', borderRadius: 100, background: tab === t.id ? 'rgba(180,160,214,0.15)' : 'var(--ink-3)', color: tab === t.id ? 'var(--m-violet)' : 'var(--m-fg-3)' }}>
-                    {report.findings.length}
+                    {findings.length}
                   </span>
                 )}
                 {t.id === 'fixes' && adminToken && (
@@ -229,11 +228,26 @@ export default function Dashboard({ report, jobId, adminToken, onReset, onExecut
       {/* ── Tab content ───────────────────────────────────────────── */}
       <main style={{ maxWidth: 1280, margin: '0 auto', padding: '48px 32px 80px' }}>
 
-        {tab === 'overview' && <OverviewTab report={report} band={band} channels={channels} critCount={critCount} highCount={highCount} />}
-        {tab === 'perception' && <PerceptionTab report={report} />}
+        {error && (
+          <div style={{
+            marginBottom: 24,
+            padding: '14px 18px',
+            borderRadius: 14,
+            background: 'rgba(213,122,120,0.08)',
+            border: '1px solid rgba(213,122,120,0.25)',
+            color: 'var(--m-bad)',
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}>
+            {error}
+          </div>
+        )}
+
+        {tab === 'overview' && <OverviewTab report={report} band={band} channels={channels} critCount={critCount} highCount={highCount} jobId={jobId} adminToken={adminToken} />}
+        {tab === 'perception' && <PerceptionTab report={report} onReset={onReset} jobId={jobId} competitorResults={competitorResults} onCompetitorResults={setCompetitorResults} />}
         {tab === 'findings' && <FindingsTab report={report} critCount={critCount} highCount={highCount} />}
-        {tab === 'products' && <ProductsTab report={report} />}
-        {tab === 'fixes' && <FixesTab report={report} jobId={jobId} adminToken={adminToken} onReset={onReset} onExecute={onExecute} />}
+        {tab === 'products' && <ProductsTab report={report} onRestart={() => onRestartWithUrl ? onRestartWithUrl(report.store_domain) : onReset()} />}
+        {tab === 'fixes' && <FixesTab report={report} jobId={jobId} adminToken={adminToken} onReset={() => onRestartWithUrl ? onRestartWithUrl(report.store_domain) : onReset()} onExecute={onExecute} onReportRefresh={onReportRefresh} />}
 
       </main>
 
@@ -247,15 +261,48 @@ export default function Dashboard({ report, jobId, adminToken, onReset, onExecut
 }
 
 // ── OVERVIEW TAB ────────────────────────────────────────────────────────
-function OverviewTab({ report, band, channels, critCount, highCount }: {
+function OverviewTab({ report, band, channels, critCount, highCount, jobId, adminToken }: {
   report: AuditReport
   band: ReturnType<typeof scoreBand>
   channels: [string, ChannelStatus][]
   critCount: number
   highCount: number
+  jobId: string
+  adminToken: string | null
 }) {
-  const score = Math.round(report.ai_readiness_score)
+  const pillars = report.pillars ?? {}
+  const score = Object.keys(pillars).length
+    ? overallFromPillars(pillars)
+    : normalizeScore(report.ai_readiness_score)
+  const findings = report.findings ?? []
   const readyCount = channels.filter(([, ch]) => ch.status === 'READY').length
+  const handleAssetDownload = async (path: string, filename: string) => {
+    // Use header auth + Blob download so the admin token never leaks into
+    // browser history, referrer headers, or web logs the way a query string would.
+    const url = `${API_BASE_URL}${path}`
+    try {
+      const headers: Record<string, string> = {}
+      if (adminToken) headers['X-Admin-Token'] = adminToken
+      const res = await fetch(url, { headers })
+      if (!res.ok) throw new Error(`Asset download failed: ${res.status}`)
+      const blob = await res.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = objectUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      // Give the browser a moment to start the download before revoking.
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+    } catch {
+      // Graceful degradation only: if fetch is blocked we still open a tab so the user gets the file.
+      const tokenSuffix = adminToken
+        ? `${path.includes('?') ? '&' : '?'}admin_token=${encodeURIComponent(adminToken)}`
+        : ''
+      window.open(`${url}${tokenSuffix}`, '_blank', 'noopener,noreferrer')
+    }
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 56 }}>
@@ -279,7 +326,7 @@ function OverviewTab({ report, band, channels, critCount, highCount }: {
           </div>
           {/* Pillar bars */}
           <div style={{ marginTop: 32, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            {Object.entries(report.pillars).map(([name, pillar]) => (
+            {Object.entries(pillars).map(([name, pillar]) => (
               <PillarBar key={name} label={PILLAR_LABELS[name] ?? name} score={pillar.score} />
             ))}
           </div>
@@ -298,7 +345,7 @@ function OverviewTab({ report, band, channels, critCount, highCount }: {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 20, paddingTop: 24, borderTop: '1px solid var(--paper-line)', marginTop: 24 }}>
             {[
-              { v: report.findings.length,            l: 'issues' },
+              { v: findings.length,                   l: 'issues' },
               { v: critCount + highCount,             l: 'urgent issues' },
               { v: channels.filter(([,c]) => c.status === 'READY').length + '/' + channels.length, l: 'channels ready' },
             ].map(s => (
@@ -329,9 +376,11 @@ function OverviewTab({ report, band, channels, critCount, highCount }: {
                   <span style={{ fontSize: 12, color: 'var(--m-fg)', fontWeight: 500 }}>{CHANNEL_LABELS[key] ?? key}</span>
                   <StatusDot color={cfg.c} size={6} />
                 </div>
-                <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, letterSpacing: '0.06em', color: cfg.c, fontWeight: 500 }}>{({'READY':'Ready','PARTIAL':'Partial','NOT_READY':'Not ready','BLOCKED':'Blocked'} as Record<string,string>)[ch.status] ?? ch.status}</span>
+                <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, letterSpacing: '0.06em', color: cfg.c, fontWeight: 500 }}>{CHANNEL_STATUS_LABELS[ch.status] ?? ch.status}</span>
                 <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--m-fg-3)' }}>
-                  {ch.blocking_check_ids.length === 0 ? 'all clear' : `${ch.blocking_check_ids.length} issue${ch.blocking_check_ids.length > 1 ? 's' : ''} blocking`}
+                  {(ch.blocking_check_ids?.length ?? 0) === 0
+                    ? 'all clear'
+                    : `${ch.blocking_check_ids.length} issue${ch.blocking_check_ids.length > 1 ? 's' : ''} blocking`}
                 </span>
               </div>
             )
@@ -339,28 +388,12 @@ function OverviewTab({ report, band, channels, critCount, highCount }: {
         </div>
       </section>
 
-      {/* Query match preview */}
-      {report.query_match_results.length > 0 && (
-        <section>
-          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20 }}>
-            <div>
-              <div className="eyebrow">AI Query Match Simulator</div>
-              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 32, lineHeight: 1.05, fontWeight: 400, margin: '8px 0 0', color: 'var(--m-fg)' }}>Buyer queries vs. your catalog.</h3>
-            </div>
-            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: 'var(--m-fg-3)' }}>{report.query_match_results.length} queries tested</span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            {report.query_match_results.map((r, i) => <QueryMatchBar key={i} result={r} />)}
-          </div>
-        </section>
-      )}
-
       {/* Top findings preview */}
-      {report.findings.length > 0 && (
+      {findings.length > 0 && (
         <section>
           <div className="eyebrow" style={{ marginBottom: 16 }}>Top Issues</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            {report.findings.slice(0, 4).map(f => (
+            {findings.slice(0, 4).map(f => (
               <div key={f.id} style={{ background: 'var(--ink-2)', border: '1px solid var(--ink-line)', borderRadius: 14, padding: '16px 18px', display: 'flex', gap: 14, alignItems: 'flex-start' }}>
                 <SeverityTag severity={f.severity} />
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -372,12 +405,174 @@ function OverviewTab({ report, band, channels, critCount, highCount }: {
           </div>
         </section>
       )}
+
+      {/* Channel readiness deep audit */}
+      <ChannelReadinessAudit report={report} />
+
+      {(report.feed_summaries || report.llms_txt_preview) && (
+        <section>
+          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20, gap: 16, flexWrap: 'wrap' }}>
+            <div>
+              <div className="eyebrow">Generated Assets</div>
+              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 32, lineHeight: 1.05, fontWeight: 400, margin: '8px 0 0', color: 'var(--m-fg)' }}>Scope we can stand behind.</h3>
+            </div>
+            <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: 'var(--m-fg-3)' }}>
+              Core flow: audit, explain, verify, and auto-fix supported fields
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: 16 }}>
+            <div style={{ background: 'var(--ink-2)', border: '1px solid var(--ink-line)', borderRadius: 18, padding: 24 }}>
+              <div className="eyebrow" style={{ marginBottom: 12 }}>Ready To Export</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+                {[
+                  { label: 'llms.txt', path: `/jobs/${jobId}/llms-txt`, filename: `llms-${jobId.slice(0,8)}.txt` },
+                  { label: 'Schema Package', path: `/jobs/${jobId}/schema-package`, filename: `schema-${jobId.slice(0,8)}.json` },
+                  { label: 'Google Feed', path: `/jobs/${jobId}/feeds/google`, filename: `google-feed-${jobId.slice(0,8)}.xml` },
+                  { label: 'Perplexity Feed', path: `/jobs/${jobId}/feeds/perplexity`, filename: `perplexity-feed-${jobId.slice(0,8)}.xml` },
+                  { label: 'ChatGPT Feed', path: `/jobs/${jobId}/feeds/chatgpt`, filename: `chatgpt-feed-${jobId.slice(0,8)}.jsonl` },
+                ].map(asset => (
+                  <button
+                    key={asset.label}
+                    onClick={() => handleAssetDownload(asset.path, asset.filename)}
+                    type="button"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px',
+                      borderRadius: 999, border: '1px solid var(--ink-line)', color: 'var(--m-fg)',
+                      background: 'transparent', cursor: 'pointer', fontFamily: 'var(--font-geist)',
+                      fontSize: 12,
+                    }}
+                  >
+                    {asset.label} <ArrowRight size={11} />
+                  </button>
+                ))}
+              </div>
+              {report.feed_summaries && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
+                  {Object.entries(report.feed_summaries).map(([name, summary]) => (
+                    <div key={name} style={{ borderRadius: 12, background: 'var(--ink-3)', border: '1px solid var(--ink-line)', padding: '12px 14px' }}>
+                      <div style={{ fontSize: 12, color: 'var(--m-fg)', marginBottom: 4, textTransform: 'capitalize' }}>{name}</div>
+                      <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--m-fg-3)', lineHeight: 1.5 }}>
+                        {JSON.stringify(summary)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ background: 'var(--ink-2)', border: '1px solid var(--ink-line)', borderRadius: 18, padding: 24 }}>
+              <div className="eyebrow" style={{ marginBottom: 12 }}>Product Scope</div>
+              <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--m-fg-2)', lineHeight: 1.55 }}>
+                Autonomous fixes are deliberately limited to catalog fields we can write, verify live, and roll back safely.
+                Generated assets and lab workflows stay separate from that core promise.
+              </p>
+              {report.llms_txt_preview && (
+                <pre style={{
+                  margin: 0, whiteSpace: 'pre-wrap', fontSize: 11, lineHeight: 1.5,
+                  color: 'var(--m-fg-3)', fontFamily: 'var(--font-geist-mono)',
+                  background: 'var(--ink-3)', border: '1px solid var(--ink-line)',
+                  borderRadius: 12, padding: 14, maxHeight: 220, overflow: 'auto',
+                }}>
+                  {report.llms_txt_preview}
+                </pre>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   )
 }
 
+// ── CHANNEL READINESS AUDIT (surfaces bot_access, identifier_audit, golden_record, trust_signals)
+function ChannelReadinessAudit({ report }: { report: AuditReport }) {
+  const bot = report.bot_access as Record<string, any> | undefined
+  const ident = report.identifier_audit as Record<string, any> | undefined
+  const golden = report.golden_record as Record<string, any> | undefined
+  const trust = report.trust_signals as Record<string, any> | undefined
+
+  if (!bot && !ident && !golden && !trust) return null
+
+  const tile = (title: string, value: string | number, subtitle: string, color: string) => (
+    <div style={{
+      background: 'var(--ink-2)', border: '1px solid var(--ink-line)',
+      borderRadius: 14, padding: '18px 20px',
+    }}>
+      <div className="eyebrow" style={{ marginBottom: 8 }}>{title}</div>
+      <div style={{ fontFamily: 'var(--font-display)', fontSize: 32, lineHeight: 1, color }}>{value}</div>
+      <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 10, color: 'var(--m-fg-3)', marginTop: 8, letterSpacing: '0.06em' }}>
+        {subtitle}
+      </div>
+    </div>
+  )
+
+  // Defensive accessors — different deployments may shape these differently.
+  const botBlocked = Array.isArray(bot?.blocked_bots) ? bot.blocked_bots.length : (bot?.blocked_count ?? 0)
+  const botAllowed = Array.isArray(bot?.allowed_bots) ? bot.allowed_bots.length : (bot?.allowed_count ?? 0)
+  const identCoverage = ident?.coverage_pct ?? ident?.coverage ?? null
+  const identMissing = ident?.missing_count ?? (Array.isArray(ident?.missing) ? ident.missing.length : null)
+  const goldenScore = golden?.score ?? golden?.overall ?? null
+  const trustScore = trust?.score ?? trust?.overall ?? null
+
+  const fmtPct = (v: number | null) =>
+    v == null ? '—' : `${Math.round(v <= 1 ? v * 100 : v)}%`
+  const fmtScore = (v: number | null) =>
+    v == null ? '—' : String(Math.round(v <= 1 ? v * 100 : v))
+
+  // Color a 0–1 (or 0–100) metric, returning a neutral grey when null/undefined
+  // so the dashboard doesn't pretend a missing measurement is a failure.
+  const metricColor = (v: number | null | undefined): string => {
+    if (v == null || Number.isNaN(v)) return 'var(--m-fg-3)'
+    const pct = v <= 1 ? v * 100 : v
+    if (pct >= 70) return 'var(--m-good)'
+    if (pct >= 40) return 'var(--m-warn)'
+    return 'var(--m-bad)'
+  }
+
+  return (
+    <section>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <div className="eyebrow">Deeper audit</div>
+          <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 32, lineHeight: 1.05, fontWeight: 400, margin: '8px 0 0', color: 'var(--m-fg)' }}>
+            What's under the hood.
+          </h3>
+        </div>
+        <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, color: 'var(--m-fg-3)' }}>
+          Signals AI shopping platforms weight separately from the headline checks
+        </span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+        {bot && tile(
+          'Bot access',
+          botBlocked === 0 ? 'OK' : `${botBlocked} blocked`,
+          `${botAllowed} AI bots allowed in robots.txt`,
+          botBlocked === 0 ? 'var(--m-good)' : 'var(--m-warn)',
+        )}
+        {ident && tile(
+          'Identifiers',
+          fmtPct(identCoverage),
+          identMissing != null ? `${identMissing} products without GTIN/MPN` : 'GTIN / barcode / MPN coverage',
+          metricColor(identCoverage),
+        )}
+        {golden && tile(
+          'Golden record',
+          fmtScore(goldenScore),
+          'Catalog data integrity score',
+          metricColor(goldenScore),
+        )}
+        {trust && tile(
+          'Trust signals',
+          fmtScore(trustScore),
+          'Policy clarity, shipping, returns',
+          metricColor(trustScore),
+        )}
+      </div>
+    </section>
+  )
+}
+
 // ── PERCEPTION TAB ──────────────────────────────────────────────────────
-function PerceptionTab({ report }: { report: AuditReport }) {
+function PerceptionTab({ report, onReset, jobId, competitorResults, onCompetitorResults }: { report: AuditReport; onReset: () => void; jobId: string; competitorResults: CompetitorResult[]; onCompetitorResults: (r: CompetitorResult[]) => void }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 56 }}>
 
@@ -407,6 +602,55 @@ function PerceptionTab({ report }: { report: AuditReport }) {
         )}
       </section>
 
+      {/* Per-product perception drift */}
+      {report.product_perceptions && report.product_perceptions.length > 0 && (
+        <section>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>Per-product drift</div>
+          <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--m-fg-3)', lineHeight: 1.55 }}>
+            How AI extraction reshapes each product's positioning. Cells flagged "cannot determine" are the data
+            gaps that pull the overall perception away from your intent.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {report.product_perceptions.slice(0, 5).map((pp, i) => (
+              <div key={i} style={{
+                background: 'var(--ink-2)', border: '1px solid var(--ink-line)',
+                borderRadius: 14, padding: '16px 20px',
+              }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 10 }}>
+                  <div>
+                    <div className="eyebrow" style={{ marginBottom: 6, color: 'var(--m-good)' }}>Intended</div>
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--m-fg-2)', lineHeight: 1.5 }}>{pp.intended || '—'}</p>
+                  </div>
+                  <div>
+                    <div className="eyebrow" style={{ marginBottom: 6, color: 'var(--m-bad)' }}>AI extracted</div>
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--m-fg-2)', lineHeight: 1.5, fontStyle: 'italic' }}>{pp.ai_extracted || '—'}</p>
+                  </div>
+                </div>
+                {pp.cannot_determine && pp.cannot_determine.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                    {pp.cannot_determine.slice(0, 6).map((field, j) => (
+                      <span key={j} style={{
+                        fontFamily: 'var(--font-geist-mono)', fontSize: 10,
+                        padding: '2px 8px', borderRadius: 100,
+                        background: 'rgba(213,122,120,0.08)', border: '1px solid rgba(213,122,120,0.2)',
+                        color: 'var(--m-bad)',
+                      }}>
+                        cannot determine: {field}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            {report.product_perceptions.length > 5 && (
+              <p style={{ margin: 0, fontSize: 11, color: 'var(--m-fg-3)', textAlign: 'center' }}>
+                Showing 5 of {report.product_perceptions.length} — full data available via API.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
+
       {/* MCP simulation */}
       {report.mcp_simulation && report.mcp_simulation.length > 0 && (
         <section>
@@ -422,37 +666,44 @@ function PerceptionTab({ report }: { report: AuditReport }) {
       )}
 
       {/* Competitor comparison */}
-      {report.competitor_comparison.length > 0 && (
-        <section>
-          <div className="eyebrow" style={{ marginBottom: 6 }}>Competitor Comparison</div>
-          <p style={{ margin: '0 0 18px', fontSize: 13, color: 'var(--m-fg-3)', lineHeight: 1.5 }}>How nearby stores compare on AI readiness. Areas where they score higher than you.</p>
-          <CompetitorPanel results={report.competitor_comparison} />
-        </section>
-      )}
+      <section>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Competitor Comparison</div>
+        {competitorResults.length > 0 ? (
+          <CompetitorPanel results={competitorResults} />
+        ) : (
+          <CompetitorDiscovery
+            jobId={jobId}
+            onResults={onCompetitorResults}
+          />
+        )}
+      </section>
     </div>
   )
 }
 
 // ── FINDINGS TAB ────────────────────────────────────────────────────────
 function FindingsTab({ report, critCount, highCount }: { report: AuditReport; critCount: number; highCount: number }) {
+  const findings = report.findings ?? []
   return (
     <div>
       <div className="eyebrow">All issues found</div>
       <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(32px,4vw,52px)', lineHeight: 1.0, letterSpacing: '-0.02em', fontWeight: 400, margin: '12px 0 8px', color: 'var(--m-fg)' }}>
-        {report.findings.length} <em style={{ fontStyle: 'italic', color: 'var(--m-violet)' }}>thing{report.findings.length !== 1 ? 's' : ''} to fix.</em>
+        {findings.length} <em style={{ fontStyle: 'italic', color: 'var(--m-violet)' }}>thing{findings.length !== 1 ? 's' : ''} to fix.</em>
       </h2>
       <div style={{ display: 'flex', gap: 10, marginBottom: 32 }}>
         {critCount > 0 && <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, padding: '4px 10px', borderRadius: 100, background: 'rgba(213,122,120,0.1)', border: '1px solid rgba(213,122,120,0.25)', color: 'var(--m-bad)' }}>{critCount} Critical</span>}
         {highCount > 0 && <span style={{ fontFamily: 'var(--font-geist-mono)', fontSize: 11, padding: '4px 10px', borderRadius: 100, background: 'rgba(212,169,107,0.1)', border: '1px solid rgba(212,169,107,0.25)', color: 'var(--m-warn)' }}>{highCount} High</span>}
       </div>
-      <FindingsTable findings={report.findings} />
+      <FindingsTable findings={findings} />
     </div>
   )
 }
 
 // ── PRODUCTS TAB ────────────────────────────────────────────────────────
-function ProductsTab({ report }: { report: AuditReport }) {
-  const products = report.all_products ?? report.worst_5_products
+function ProductsTab({ report, onRestart }: { report: AuditReport; onRestart: () => void }) {
+  const products = report.all_products ?? report.worst_5_products ?? []
+  const findings = report.findings ?? []
+  const worst = report.worst_5_products ?? []
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 48 }}>
@@ -462,22 +713,50 @@ function ProductsTab({ report }: { report: AuditReport }) {
           Completeness <em style={{ fontStyle: 'italic', color: 'var(--m-violet)' }}>heatmap.</em>
         </h2>
         <p style={{ fontSize: 14, color: 'var(--m-fg-2)', marginTop: 8, lineHeight: 1.5 }}>
-          Every product graded against the 19 checks. Red cells are gaps AI agents hit.
+          Every product graded against the catalog completeness checks. Red cells are gaps AI agents hit.
         </p>
       </div>
+
+      {report.scan_limited && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+          padding: '14px 20px', borderRadius: 14, flexWrap: 'wrap',
+          background: 'rgba(212,169,107,0.06)', border: '1px solid rgba(212,169,107,0.2)',
+        }}>
+          <div>
+            <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--m-warn)' }}>
+              Free scan — showing {report.total_products} of {report.full_product_count} products
+            </span>
+            <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--m-fg-3)' }}>
+              Add an Admin Token to scan your full catalog and unlock autonomous fixes.
+            </p>
+          </div>
+          <button
+            onClick={onRestart}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '8px 16px', borderRadius: 100, border: '1px solid rgba(212,169,107,0.4)',
+              background: 'transparent', color: 'var(--m-warn)', fontSize: 12,
+              cursor: 'pointer', fontFamily: 'var(--font-geist)', whiteSpace: 'nowrap',
+            }}
+          >
+            Run full scan <ArrowRight size={11} />
+          </button>
+        </div>
+      )}
 
       {products.length > 0 && (
         <div style={{ background: 'var(--ink-2)', border: '1px solid var(--ink-line)', borderRadius: 20, padding: 28 }}>
           <div className="eyebrow" style={{ marginBottom: 20 }}>Completeness Heatmap</div>
-          <HeatmapGrid products={products} findings={report.findings} />
+          <HeatmapGrid products={products} findings={findings} />
         </div>
       )}
 
-      {report.worst_5_products.length > 0 && (
+      {worst.length > 0 && (
         <div>
           <div className="eyebrow" style={{ marginBottom: 20 }}>Most Problematic Products</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {report.worst_5_products.map((product, idx) => (
+            {worst.map((product, idx) => (
               <div key={product.product_id} style={{ background: 'var(--ink-2)', border: '1px solid var(--ink-line)', borderRadius: 14, padding: '16px 20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0, flex: 1 }}>
@@ -485,11 +764,11 @@ function ProductsTab({ report }: { report: AuditReport }) {
                     <div style={{ minWidth: 0 }}>
                       <p style={{ margin: '0 0 6px', fontSize: 14, color: 'var(--m-fg)', fontWeight: 500 }}>{product.title}</p>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {product.failing_check_ids.slice(0, 6).map(id => (
+                        {(product.failing_check_ids ?? []).slice(0, 6).map(id => (
                           <span key={id} style={{ fontSize: 11, background: 'var(--ink-3)', color: 'var(--m-fg-3)', borderRadius: 6, padding: '2px 8px', border: '1px solid var(--ink-line)' }}>{CHECK_LABELS[id] ?? id}</span>
                         ))}
-                        {product.failing_check_ids.length > 6 && (
-                          <span style={{ fontSize: 11, color: 'var(--m-fg-4)', padding: '2px 4px' }}>+{product.failing_check_ids.length - 6} more</span>
+                        {(product.failing_check_ids?.length ?? 0) > 6 && (
+                          <span style={{ fontSize: 11, color: 'var(--m-fg-4)', padding: '2px 4px' }}>+{(product.failing_check_ids?.length ?? 0) - 6} more</span>
                         )}
                       </div>
                     </div>
@@ -512,12 +791,13 @@ function ProductsTab({ report }: { report: AuditReport }) {
 }
 
 // ── FIXES TAB ───────────────────────────────────────────────────────────
-function FixesTab({ report, jobId, adminToken, onReset, onExecute }: {
+function FixesTab({ report, jobId, adminToken, onReset, onExecute, onReportRefresh }: {
   report: AuditReport
   jobId: string
   adminToken: string | null
   onReset: () => void
   onExecute: (ids: string[]) => Promise<void>
+  onReportRefresh?: () => void | Promise<void>
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 48 }}>
@@ -529,15 +809,18 @@ function FixesTab({ report, jobId, adminToken, onReset, onExecute }: {
         </h2>
         <p style={{ fontSize: 15, lineHeight: 1.55, color: 'var(--m-fg-2)', margin: 0, maxWidth: 560 }}>
           {adminToken
-            ? 'Approve fixes one by one or in bulk. Every change is logged and reversible.'
+            ? 'Approve fixes one by one or in bulk. Every autonomous change is logged, verified, and rollback-ready.'
             : 'Add an Admin Token to unlock autonomous fix execution.'}
         </p>
       </div>
 
       {!adminToken && (
         <div style={{ background: 'var(--ink-2)', border: '1px solid rgba(212,169,107,0.25)', borderRadius: 20, padding: 40, textAlign: 'center' }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, background: 'rgba(212,169,107,0.1)', border: '1px solid rgba(212,169,107,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 22 }}>
-            🔑
+          <div style={{ width: 48, height: 48, borderRadius: 14, background: 'rgba(212,169,107,0.1)', border: '1px solid rgba(212,169,107,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', color: 'var(--m-warn)' }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="8" cy="14" r="4" />
+              <path d="M11 11l9-9M16 6l3 3" />
+            </svg>
           </div>
           <p style={{ fontSize: 16, fontWeight: 600, color: 'var(--m-fg)', margin: '0 0 8px' }}>Admin Token Required</p>
           <p style={{ fontSize: 14, color: 'var(--m-fg-2)', margin: '0 0 20px', maxWidth: 400, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.55 }}>
@@ -557,14 +840,19 @@ function FixesTab({ report, jobId, adminToken, onReset, onExecute }: {
       )}
 
       {report.agent_run && (
-        <AgentActivity agentRun={report.agent_run} />
+        <AgentActivity
+          agentRun={report.agent_run}
+          jobId={jobId}
+          adminToken={adminToken}
+          onAfterRollback={onReportRefresh}
+        />
       )}
 
       {report.agent_run?.before_after && (
         <>
           <BeforeAfterReport
             data={report.agent_run.before_after}
-            copyPasteItems={report.copy_paste_package}
+            copyPasteItems={report.copy_paste_package ?? []}
             storeName={report.store_name}
           />
           <ReadinessCertificate

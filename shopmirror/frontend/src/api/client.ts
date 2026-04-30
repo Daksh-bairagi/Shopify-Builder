@@ -15,8 +15,21 @@ export interface JobProgress {
   pct: number
 }
 
+// Status values that the backend actually emits. 'error' was historical and is not used —
+// backend writes 'failed' on any error path via update_job_error.
+export type JobStatus =
+  | 'pending'
+  | 'queued'
+  | 'ingesting'
+  | 'auditing'
+  | 'simulating'
+  | 'complete'
+  | 'awaiting_approval'
+  | 'executing'
+  | 'failed'
+
 export interface JobStatusResponse {
-  status: 'pending' | 'ingesting' | 'auditing' | 'simulating' | 'complete' | 'awaiting_approval' | 'executing' | 'failed' | 'error'
+  status: JobStatus
   progress: JobProgress
   report: AuditReport | null
   error: string | null
@@ -55,7 +68,7 @@ export interface ProductSummary {
 }
 
 export interface ChannelStatus {
-  status: 'READY' | 'PARTIAL' | 'BLOCKED'
+  status: 'READY' | 'PARTIAL' | 'BLOCKED' | 'NOT_READY'
   blocking_check_ids: string[]
 }
 
@@ -89,14 +102,6 @@ export interface MCPResult {
   related_finding_ids: string[]
 }
 
-export interface QueryMatchResult {
-  query: string
-  matched_product_ids: string[]
-  total_products: number
-  match_count: number
-  failing_attributes: Record<string, number>
-}
-
 export interface CompetitorAudit {
   url: string
   store_domain: string
@@ -106,6 +111,17 @@ export interface CompetitorAudit {
 export interface CompetitorResult {
   competitor: CompetitorAudit
   gaps: string[]
+}
+
+export interface CompetitorDiscoveryResponse {
+  results: CompetitorResult[]
+  status: string
+  message: string
+  mode: 'auto' | 'manual'
+  scope_label: string
+  candidates_considered: number
+  audited_competitors: number
+  notes: string[]
 }
 
 export interface FixItem {
@@ -143,6 +159,8 @@ export interface FixResult {
   shopify_gid: string | null
   script_tag_id: string | null
   applied_at: string | null
+  display_label?: string
+  rolled_back?: boolean
 }
 
 export interface CopyPasteItem {
@@ -185,24 +203,24 @@ export interface AuditReport {
   perception_diff: PerceptionDiff | null
   product_perceptions: ProductPerception[]
   mcp_simulation: MCPResult[] | null
-  query_match_results: QueryMatchResult[]
   competitor_comparison: CompetitorResult[]
   copy_paste_package: CopyPasteItem[]
   agent_run?: AgentRun
+  bot_access?: Record<string, unknown>
+  identifier_audit?: Record<string, unknown>
+  golden_record?: Record<string, unknown>
+  trust_signals?: Record<string, unknown>
+  ai_visibility?: Record<string, unknown>
+  feed_summaries?: Record<string, unknown>
+  llms_txt_preview?: string
+  scan_limited?: boolean
+  full_product_count?: number
 }
 
-export interface QueryMatchResponse {
-  query: string
-  matched_product_ids: string[]
-  total_products: number
-  match_count: number
-  failing_attributes: Record<string, number>
-}
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -215,7 +233,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`)
+  const res = await fetch(`${API_BASE_URL}${path}`)
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail ?? 'Request failed')
@@ -226,9 +244,14 @@ async function get<T>(path: string): Promise<T> {
 export const api = {
   analyze: (req: AnalyzeRequest) => post<AnalyzeResponse>('/analyze', req),
   getJob: (jobId: string) => get<JobStatusResponse>(`/jobs/${jobId}`),
-  queryMatch: (jobId: string, query: string) =>
-    get<QueryMatchResponse>(`/jobs/${jobId}/query-match?query=${encodeURIComponent(query)}`),
   getFixPlan: (jobId: string) => get<FixPlanResponse>(`/jobs/${jobId}/fix-plan`),
   execute: (jobId: string, req: ExecuteRequest) => post<ExecuteResponse>(`/jobs/${jobId}/execute`, req),
   getBeforeAfter: (jobId: string) => get<BeforeAfterResponse>(`/jobs/${jobId}/before-after`),
+  findCompetitors: (jobId: string, urls: string[] = []) =>
+    post<CompetitorDiscoveryResponse>(`/jobs/${jobId}/competitors`, { competitor_urls: urls }),
+  rollback: (jobId: string, fixId: string, adminToken: string) =>
+    post<{ status: string; field: string; restored_value: string }>(
+      `/jobs/${jobId}/rollback/${fixId}`,
+      { admin_token: adminToken },
+    ),
 }

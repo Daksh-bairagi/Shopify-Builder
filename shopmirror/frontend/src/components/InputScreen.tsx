@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnalyzeRequest } from '../api/client'
 
 interface Props {
   onSubmit: (req: AnalyzeRequest) => void
   error: string | null
+  prefillUrl?: string | null
 }
 
 function ArrowRight({ size = 14 }: { size?: number }) {
@@ -29,14 +30,18 @@ function Logo() {
   )
 }
 
-export default function InputScreen({ onSubmit, error }: Props) {
+export default function InputScreen({ onSubmit, error, prefillUrl }: Props) {
   const [loading, setLoading] = useState(false)
   const [showToken, setShowToken] = useState(false)
-  const [storeUrl, setStoreUrl] = useState('')
+  const [storeUrl, setStoreUrl] = useState(prefillUrl ?? '')
   const [adminToken, setAdminToken] = useState('')
   const [merchantIntent, setMerchantIntent] = useState('')
   const [competitorUrl1, setCompetitorUrl1] = useState('')
   const [competitorUrl2, setCompetitorUrl2] = useState('')
+
+  useEffect(() => {
+    if (prefillUrl) setStoreUrl(prefillUrl)
+  }, [prefillUrl])
 
   function normalizeUrl(raw: string): string {
     let url = raw.trim()
@@ -93,18 +98,19 @@ export default function InputScreen({ onSubmit, error }: Props) {
 
   return (
     <div style={{
-      minHeight: '100vh',
+      height: '100vh',
       display: 'grid',
       gridTemplateColumns: '1fr 1fr',
       position: 'relative',
       background: 'var(--ink)',
       fontFamily: 'var(--font-geist)',
+      overflow: 'hidden',
     }}>
       {/* Seam */}
       <div className="seam-line" />
 
       {/* LEFT — form */}
-      <div style={{ padding: '64px 72px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', color: 'var(--m-fg)' }}>
+      <div style={{ padding: '64px 72px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', color: 'var(--m-fg)', overflowY: 'auto' }}>
         <Logo />
 
         <div style={{ maxWidth: 460 }}>
@@ -241,7 +247,7 @@ export default function InputScreen({ onSubmit, error }: Props) {
 
         {/* Trust badges */}
         <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-          {['Token never stored', 'Results in ~60 s', 'Every fix reversible'].map(t => (
+          {['Token never stored', 'Typical scan: 1–3 min', 'Every fix reversible'].map(t => (
             <span key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--m-fg-3)', fontFamily: 'var(--font-geist)' }}>
               <span style={{ width: 4, height: 4, background: 'var(--m-violet)', borderRadius: '50%', display: 'inline-block' }} />
               {t}
@@ -251,7 +257,7 @@ export default function InputScreen({ onSubmit, error }: Props) {
       </div>
 
       {/* RIGHT — paper preview */}
-      <div style={{ background: 'var(--paper)', color: 'var(--paper-ink)', padding: '64px 72px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div style={{ background: 'var(--paper)', color: 'var(--paper-ink)', padding: '64px 72px', display: 'flex', flexDirection: 'column', justifyContent: 'center', overflowY: 'auto' }}>
         <div className="eyebrow-paper">The reflection — what we'll run</div>
         <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(24px,3vw,40px)', lineHeight: 1.1, letterSpacing: '-0.015em', fontWeight: 400, margin: '16px 0 56px', fontStyle: 'italic', color: 'var(--paper-ink)', maxWidth: 480 }}>
           We'll read your store the way an AI agent does — and show you the gap, line by line.

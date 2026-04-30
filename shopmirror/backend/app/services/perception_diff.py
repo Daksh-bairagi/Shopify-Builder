@@ -45,6 +45,134 @@ class ProductPerceptionItem(BaseModel):
 class BatchProductPerceptionOutput(BaseModel):
     products: list[ProductPerceptionItem]
 
+class CombinedPerceptionOutput(BaseModel):
+    """Single structured output for both store-level + product-level perception — one LLM call."""
+    store: StorePerceptionOutput
+    products: list[ProductPerceptionItem]
+
+
+# ---------------------------------------------------------------------------
+# Combined function — ONE LLM call for both store + product perceptions
+# ---------------------------------------------------------------------------
+
+async def compute_combined_perception(
+    data: MerchantData,
+    findings: list[Finding],
+    merchant_intent: str | None = None,
+    max_products: int = 10,
+) -> tuple[PerceptionDiff, list[ProductPerception]]:
+    """
+    Single Gemini call that returns both store-level perception diff AND
+    per-product perception analysis. Replaces the two separate calls to
+    compute_store_perception_diff + compute_product_perceptions.
+    """
+    from collections import Counter
+
+    # --- Select worst products ---
+    product_issue_count: Counter[str] = Counter()
+    for f in findings:
+        for pid in f.affected_products:
+            product_issue_count[pid] += 1
+
+    id_to_product = {p.id: p for p in data.products}
+    selected: list[Product] = []
+    if product_issue_count:
+        for pid, _ in product_issue_count.most_common():
+            if pid in id_to_product and len(selected) < max_products:
+                selected.append(id_to_product[pid])
+    if len(selected) < max_products:
+        seen = {p.id for p in selected}
+        for p in data.products:
+            if p.id not in seen and len(selected) < max_products:
+                selected.append(p)
+
+    # --- Build prompt ---
+    sample_titles = ", ".join(p.title for p in data.products[:10])
+    raw_types = [p.product_type for p in data.products if p.product_type]
+    product_types = ", ".join(list(dict.fromkeys(raw_types))[:5]) or "not specified"
+    all_tags: list[str] = []
+    for p in data.products:
+        all_tags.extend(p.tags)
+    tags_sample = ", ".join(list(dict.fromkeys(all_tags))[:15]) or "none"
+    findings_summary = "\n".join(
+        f"- [{f.severity}] {f.check_id}: {f.title}" for f in findings[:8]
+    )
+    intent_line = f"Merchant stated intent: {merchant_intent}\n" if merchant_intent else ""
+
+    product_blocks: list[str] = []
+    for p in selected:
+        option_names = ", ".join(o.name for o in p.options) if p.options else "none"
+        product_blocks.append(
+            f"ID: {p.id}\nTitle: {p.title}\nType: {p.product_type or 'not specified'}\n"
+            f"Tags: {', '.join(p.tags) if p.tags else 'none'}\nOptions: {option_names}\n"
+            f"Has description: {'yes' if p.body_html else 'no'}\nVariants: {len(p.variants)}"
+        )
+    products_text = "\n\n".join(product_blocks)
+
+    prompt = (
+        f"You are analyzing a Shopify store from an AI shopping agent's perspective.\n\n"
+        f"Store: {data.store_name}\n{intent_line}"
+        f"Domain: {data.store_domain}\n"
+        f"Total products: {len(data.products)}\n"
+        f"Sample titles: {sample_titles}\n"
+        f"Product types: {product_types}\nTags: {tags_sample}\n\n"
+        f"Audit findings:\n{findings_summary}\n\n"
+        "SECTION A — Store perception:\n"
+        "1. How the merchant INTENDS to be positioned (infer from titles, types, vendor name)\n"
+        "2. How an AI agent ACTUALLY perceives this store from structured data\n"
+        "3. Specific reasons for any gap (2–5 bullet points)\n\n"
+        "SECTION B — Per-product perception (one entry per product below):\n"
+        "For each product: what the merchant intends, what AI can extract, "
+        "and key attributes AI cannot determine.\n\n"
+        f"Products:\n{products_text}\n\n"
+        "Return both sections in the CombinedPerceptionOutput schema."
+    )
+
+    try:
+        llm = _get_llm()
+        structured_llm = llm.with_structured_output(CombinedPerceptionOutput)
+        result: CombinedPerceptionOutput = await structured_llm.ainvoke(
+            [HumanMessage(content=prompt)]
+        )
+
+        perception_diff = PerceptionDiff(
+            intended_positioning=result.store.intended_positioning,
+            ai_perception=result.store.ai_perception,
+            gap_reasons=result.store.gap_reasons,
+        )
+
+        # Build finding-to-product mapping
+        product_finding_ids: dict[str, list[str]] = {p.id: [] for p in selected}
+        for f in findings:
+            for pid in f.affected_products:
+                if pid in product_finding_ids:
+                    product_finding_ids[pid].append(f.id)
+
+        result_map = {item.product_id: item for item in result.products}
+        perceptions: list[ProductPerception] = []
+        for p in selected:
+            item = result_map.get(p.id)
+            if item is None:
+                continue
+            perceptions.append(ProductPerception(
+                product_id=p.id,
+                intended=item.intended,
+                ai_extracted=item.ai_extracted,
+                cannot_determine=item.cannot_determine,
+                root_finding_ids=product_finding_ids.get(p.id, []),
+            ))
+
+        return perception_diff, perceptions
+
+    except Exception:
+        fallback_diff = PerceptionDiff(
+            intended_positioning="Could not determine intended positioning",
+            ai_perception="Insufficient data to assess AI perception",
+            gap_reasons=["Analysis unavailable"],
+        )
+        return fallback_diff, []
+
+
 
 # --- Public async functions ---
 

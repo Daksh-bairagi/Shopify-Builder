@@ -4,25 +4,49 @@ interface Props {
   status: JobStatusResponse
 }
 
-const STEPS = [
-  { l: 'Connecting to storefront',   d: 'Pulling sitemap, robots.txt, theme metadata' },
-  { l: 'Ingesting product catalog',  d: 'Products, variants, pricing, inventory' },
-  { l: 'Running 19 structural checks', d: 'GTIN, taxonomy, metafields, schema.org' },
-  { l: 'Probing AI shopping agents', d: 'Gemini · Perplexity · Shopify MCP' },
-  { l: 'Computing perception gap',   d: 'Intended positioning vs. AI-extracted view' },
-  { l: 'Drafting fix plan',          d: 'Sorting by impact · auto vs. copy-paste vs. manual' },
+const AUDIT_STEPS = [
+  { l: 'Connecting to storefront',     d: 'Pulling sitemap, robots.txt, theme metadata' },
+  { l: 'Ingesting product catalog',    d: 'Products, variants, pricing, inventory' },
+  { l: 'Running structural checks',    d: 'GTIN, taxonomy, metafields, schema.org' },
+  { l: 'Probing AI shopping agents',   d: 'Gemini-driven MCP-style query simulation' },
+  { l: 'Computing perception gap',     d: 'Intended positioning vs. AI-extracted view' },
+  { l: 'Drafting fix plan',            d: 'Sorting by impact · auto vs. copy-paste vs. manual' },
 ]
 
-function statusToStep(s: JobStatusResponse['status']): number {
+const EXECUTE_STEPS = [
+  { l: 'Re-fetching live store data',  d: 'Pulling current product fields with admin token' },
+  { l: 'Applying autonomous fixes',    d: 'Taxonomy, metafields, alt text, schema script' },
+  { l: 'Verifying writes',             d: 'Confirming each change took effect on the live store' },
+  { l: 'Building before/after report', d: 'Comparing pillar scores · listing manual leftovers' },
+]
+
+function auditStep(s: JobStatusResponse['status'], pct: number): number {
   switch (s) {
     case 'pending':
-    case 'ingesting':   return 0
-    case 'auditing':    return 2
-    case 'simulating':  return 3
+    case 'queued':
+      return 0
+    case 'ingesting':
+      return pct < 25 ? 0 : 1
+    case 'auditing':
+      return 2
+    case 'simulating':
+      if (pct < 78) return 3
+      if (pct < 92) return 4
+      return 5
     case 'awaiting_approval':
-    case 'complete':    return 5
-    default:            return 0
+    case 'complete':
+      return 5
+    default:
+      return 0
   }
+}
+
+function executeStep(_s: JobStatusResponse['status'], pct: number): number {
+  // Map progress percent onto the 4-step execute list.
+  if (pct < 15) return 0
+  if (pct < 70) return 1
+  if (pct < 95) return 2
+  return 3
 }
 
 function Logo() {
@@ -41,8 +65,10 @@ function Logo() {
 }
 
 export default function ProgressScreen({ status }: Props) {
-  const activeStep = statusToStep(status.status)
   const pct = status.progress.pct
+  const isExecuting = status.status === 'executing'
+  const STEPS = isExecuting ? EXECUTE_STEPS : AUDIT_STEPS
+  const activeStep = isExecuting ? executeStep(status.status, pct) : auditStep(status.status, pct)
 
   return (
     <div style={{
@@ -63,11 +89,21 @@ export default function ProgressScreen({ status }: Props) {
         <Logo />
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          <div className="eyebrow">Auditing</div>
+          <div className="eyebrow">{isExecuting ? 'Applying fixes' : 'Auditing'}</div>
           <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(36px,4vw,60px)', lineHeight: 1.0, letterSpacing: '-0.02em', fontWeight: 400, margin: '16px 0 56px', color: 'var(--m-fg)' }}>
-            Holding the<br />
-            <em style={{ fontStyle: 'italic', color: 'var(--m-violet)' }}>mirror</em> up to<br />
-            your store…
+            {isExecuting ? (
+              <>
+                Mending the<br />
+                <em style={{ fontStyle: 'italic', color: 'var(--m-violet)' }}>reflection</em>
+                <br />on your store…
+              </>
+            ) : (
+              <>
+                Holding the<br />
+                <em style={{ fontStyle: 'italic', color: 'var(--m-violet)' }}>mirror</em> up to<br />
+                your store…
+              </>
+            )}
           </h1>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>

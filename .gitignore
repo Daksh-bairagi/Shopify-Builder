@@ -1,7 +1,4 @@
-ShopMirror_PRD (1).md
-ShopMirror_TechSpec (1).md
-
-# Local env files — never commit secrets
+# Local env files - never commit secrets
 shopmirror/backend/.env
 shopmirror/frontend/.env
 __pycache__/
@@ -9,9 +6,11 @@ __pycache__/
 **/*.pyc
 command.txt
 
-# Local tooling — not part of the app
+# Local tooling - not part of the app
+.claude/
+.uv-cache/
+.venv/
 node_modules/
 package.json
 package-lock.json
 design-system/
-.claude/skills/
