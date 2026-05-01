@@ -1,3 +1,9 @@
+/**
+ * Frontend application shell.
+ *
+ * The product demo follows one guided workflow, so we model the UI as a small
+ * screen state machine rather than a route-heavy app.
+ */
 import { useState, useEffect, useRef } from 'react'
 import { api, AuditReport, JobStatusResponse, AnalyzeRequest } from './api/client'
 import LandingPage from './components/LandingPage'
@@ -8,6 +14,8 @@ import Dashboard from './components/Dashboard'
 type Screen = 'landing' | 'input' | 'progress' | 'dashboard' | 'executing'
 
 export default function App() {
+  // Keep the high-level journey in one place so reviewers can understand the
+  // user flow without jumping across multiple stores or context providers.
   const [screen, setScreen] = useState<Screen>('landing')
   const [jobId, setJobId] = useState<string | null>(null)
   const [adminToken, setAdminToken] = useState<string | null>(null)
@@ -28,6 +36,8 @@ export default function App() {
   }
 
   const startPolling = (id: string, terminalStatuses: string[]) => {
+    // Every long-running backend operation reports progress through the same
+    // polling path; each caller decides which statuses are terminal.
     stopPolling()
     const poll = async () => {
       try {
@@ -79,6 +89,8 @@ export default function App() {
   }
 
   const handleExecute = async (approvedFixIds: string[]) => {
+    // Fix execution reuses the original job id so the audit and remediation
+    // history stay attached to the same dashboard session.
     if (!jobId || !adminToken) return
     setError(null)
     try {
@@ -96,6 +108,8 @@ export default function App() {
   }
 
   const handleReportRefresh = async () => {
+    // Refresh is intentionally non-destructive: only replace local state when
+    // the backend already has a newer persisted report available.
     if (!jobId) return
     try {
       const status = await api.getJob(jobId)

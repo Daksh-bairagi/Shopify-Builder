@@ -157,6 +157,7 @@ def _build_policy_fix_content(check_id: str) -> str:
 
 
 def build_copy_paste_items(fix_plan: list[FixItem]) -> list[dict]:
+    """Extract human-copyable outputs so the UI can present them as a package."""
     items: list[dict] = []
     for fix in fix_plan:
         if fix.fix_type != "copy_paste" or not fix.proposed_value:
@@ -171,6 +172,7 @@ def build_copy_paste_items(fix_plan: list[FixItem]) -> list[dict]:
 
 
 def _safe_price(value) -> float:
+    """Best-effort numeric parsing for price-like fields from Shopify payloads."""
     try:
         return float(value) if value is not None else 0.0
     except (TypeError, ValueError):
@@ -178,6 +180,7 @@ def _safe_price(value) -> float:
 
 
 def _catalog_eligibility_missing_fields(product, merchant_data) -> list[str]:
+    """List the minimum fields still missing for a product to look catalog-ready."""
     missing: list[str] = []
     taxonomy_gid = (merchant_data.taxonomy_by_product.get(product.id, "") if merchant_data else "") or ""
     if not taxonomy_gid.strip():

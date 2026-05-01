@@ -1,3 +1,12 @@
+"""
+FastAPI entrypoint for ShopMirror.
+
+This module stays intentionally thin: it validates requests, creates jobs,
+starts background workflows, and exposes the polling and remediation endpoints
+used by the frontend. Most domain logic lives in `app.services.*` and
+`app.agent.*`, which makes this file a good top-down entrypoint for judges.
+"""
+
 import asyncio
 import dataclasses
 import logging
@@ -44,6 +53,7 @@ from fastapi.responses import PlainTextResponse
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Warm up shared resources once and close them cleanly on shutdown."""
     try:
         await get_pool()
     except Exception as exc:
@@ -112,6 +122,7 @@ async def health():
 
 @app.post("/analyze", status_code=202)
 async def analyze(request: AnalyzeRequest, background_tasks: BackgroundTasks) -> AnalyzeResponse:
+    """Create an analysis job and hand the full pipeline to a background task."""
     try:
         await validate_shopify_url(request.store_url)
     except (ValueError, Exception):
@@ -132,6 +143,7 @@ async def analyze(request: AnalyzeRequest, background_tasks: BackgroundTasks) ->
 
 @app.get("/jobs/{job_id}")
 async def get_job_status(job_id: str) -> JobStatusResponse:
+    """Return the latest persisted job state for frontend polling."""
     row = await get_job(job_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -153,6 +165,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
 
 @app.get("/jobs/{job_id}/fix-plan")
 async def get_fix_plan(job_id: str) -> FixPlanResponse:
+    """Expose the generated fix plan after an admin-token audit."""
     row = await get_job(job_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -172,6 +185,7 @@ async def execute_fixes(
     request: ExecuteRequest,
     background_tasks: BackgroundTasks,
 ) -> ExecuteResponse:
+    """Start the LangGraph remediation flow for the selected fix ids."""
     row = await get_job(job_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")

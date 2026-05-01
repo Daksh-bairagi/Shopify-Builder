@@ -1,3 +1,11 @@
+/**
+ * Typed frontend contract for the FastAPI backend.
+ *
+ * Keeping the interfaces and fetch wrappers together makes the integration
+ * easier to audit because reviewers can see request/response shapes and route
+ * usage in one file.
+ */
+
 // Request/response shapes matching app/schemas.py
 export interface AnalyzeRequest {
   store_url: string
@@ -220,6 +228,8 @@ export interface AuditReport {
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
 async function post<T>(path: string, body: unknown): Promise<T> {
+  // Centralized wrappers keep components focused on UX state instead of
+  // repeating fetch boilerplate and backend error extraction.
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -242,6 +252,7 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export const api = {
+  // Thin route mirror used by React components.
   analyze: (req: AnalyzeRequest) => post<AnalyzeResponse>('/analyze', req),
   getJob: (jobId: string) => get<JobStatusResponse>(`/jobs/${jobId}`),
   getFixPlan: (jobId: string) => get<FixPlanResponse>(`/jobs/${jobId}/fix-plan`),

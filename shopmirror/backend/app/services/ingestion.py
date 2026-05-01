@@ -1,3 +1,11 @@
+"""
+Merchant ingestion helpers.
+
+This module translates Shopify storefront/Admin payloads into the normalized
+`MerchantData` shape used by the rest of the system. Keeping those conversion
+rules here lets the audit pipeline reason about one stable internal model.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -37,6 +45,7 @@ def _normalize_url(store_url: str) -> str:
 
 
 def _bare_domain(url: str) -> str:
+    """Return host/domain only, with protocol removed after normalization."""
     return re.sub(r"^https?://", "", _normalize_url(url))
 
 
@@ -111,6 +120,7 @@ async def _run_admin_query(
 # ---------------------------------------------------------------------------
 
 def _parse_variant(v: dict) -> ProductVariant:
+    """Map a Shopify REST variant object into our internal dataclass."""
     return ProductVariant(
         id=str(v["id"]),
         title=v.get("title", ""),
@@ -126,6 +136,7 @@ def _parse_variant(v: dict) -> ProductVariant:
 
 
 def _parse_image(img: dict) -> ProductImage:
+    """Map a Shopify REST image object into our internal dataclass."""
     return ProductImage(
         id=str(img["id"]),
         src=img.get("src", ""),
@@ -135,6 +146,7 @@ def _parse_image(img: dict) -> ProductImage:
 
 
 def _parse_option(opt: dict) -> ProductOption:
+    """Map a Shopify REST option object into our internal dataclass."""
     return ProductOption(
         name=opt.get("name", ""),
         values=opt.get("values", []),
@@ -142,6 +154,7 @@ def _parse_option(opt: dict) -> ProductOption:
 
 
 def _parse_product(p: dict) -> Product:
+    """Map a Shopify REST product payload into the normalized product model."""
     return Product(
         id=str(p["id"]),
         title=p.get("title", ""),
@@ -159,6 +172,7 @@ def _parse_product(p: dict) -> Product:
 
 
 def _parse_collection(c: dict) -> Collection:
+    """Map a Shopify REST collection payload into the normalized collection model."""
     return Collection(
         id=str(c["id"]),
         title=c.get("title", ""),
@@ -201,7 +215,13 @@ async def _discover_admin_domain(base_url: str, client: httpx.AsyncClient) -> Op
 
 
 async def resolve_admin_domain(store_url: str, admin_token: str) -> str:
-    """Resolve the canonical domain to use for Shopify Admin API calls."""
+    """Resolve the canonical domain to use for Shopify Admin API calls.
+
+    Merchants often paste a branded storefront URL, while the Admin API expects
+    the canonical `.myshopify.com` domain. We try to discover that canonical
+    host first and fall back to the supplied host when discovery is not
+    possible.
+    """
     base_url = _normalize_url(store_url)
     input_domain = _bare_domain(store_url)
     if input_domain.endswith(".myshopify.com"):

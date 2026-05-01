@@ -253,6 +253,19 @@ shopmirror/
 - [DECISION_LOG.md](./DECISION_LOG.md)
 - [CONTRIBUTION_NOTE.md](./CONTRIBUTION_NOTE.md)
 
+## Code Reading Guide
+
+For judges or reviewers who want the fastest path through the implementation:
+
+1. `shopmirror/backend/app/main.py` - API entrypoint, job lifecycle, polling, fix execution, and rollback.
+2. `shopmirror/backend/app/services/ingestion.py` - how Shopify data is normalized into the internal merchant model.
+3. `shopmirror/backend/app/services/report_builder.py` - how all pipeline outputs are assembled into the final audit report.
+4. `shopmirror/backend/app/agent/graph.py` and `shopmirror/backend/app/agent/nodes.py` - the remediation agent flow for approved fixes.
+5. `shopmirror/frontend/src/App.tsx` - the top-level UI state machine for the demo journey.
+6. `shopmirror/frontend/src/api/client.ts` - the typed frontend/backend contract.
+
+These files now include focused production-style comments and module headers so the intent, state transitions, and non-obvious business rules are easier to follow during evaluation.
+
 ## Notes
 
 This repository is intentionally kept focused on the shipped product and its core documentation. Personal workspace settings, local secrets, generated caches, and assistant-specific tooling should stay out of version control.

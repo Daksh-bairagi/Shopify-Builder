@@ -183,7 +183,11 @@ async def assemble_report(
 ) -> AuditReport:
     """
     Assembles all pipeline outputs into a single AuditReport.
-    No awaits needed — async for future-proofing only.
+    No awaits needed - async for future-proofing only.
+
+    This is the final backend join point: ingestion, auditing, simulation,
+    competitor analysis, and remediation planning all converge here before the
+    frontend receives one stable report payload.
     """
     query_match_results = query_match_results or []
     try:
@@ -284,3 +288,4 @@ async def assemble_report(
             competitor_comparison=competitor_results or [],
             copy_paste_package=copy_paste_items or [],
         )
+
